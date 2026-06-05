@@ -1,0 +1,128 @@
+"""
+tools.py — Search & Scraper tools for OrchestrAI agents.
+
+- web_search  : Tavily-powered search with key failover
+- scrape_url  : BeautifulSoup HTML extractor with fallback handling
+"""
+
+import os
+from dotenv import load_dotenv
+from langchain.tools import tool
+import requests
+from bs4 import BeautifulSoup
+from pathlib import Path
+load_dotenv(Path(__file__).parent / ".env", override=True)
+
+# ── Tavily key pool ──────────────────────────────────────────────────────────
+
+def _load_keys(env_var: str) -> list[str]:
+    raw = os.getenv(env_var, "")
+    return [k.strip() for k in raw.split(",") if k.strip()]
+
+
+TAVILY_KEYS = _load_keys("TAVILY_API_KEYS")
+
+
+def _tavily_search(query: str, max_results: int = 5) -> dict:
+    """
+    Try each Tavily key in sequence; raise only when all fail.
+    Lazy-imports TavilyClient so the module doesn't crash when keys are absent.
+    """
+    try:
+        from tavily import TavilyClient
+    except ImportError as exc:
+        raise ImportError("tavily-python not installed. Run: pip install tavily-python") from exc
+
+    last_err: Exception | None = None
+    for key in TAVILY_KEYS:
+        try:
+            client = TavilyClient(api_key=key)
+            return client.search(query=query, max_results=max_results)
+        except Exception as exc:
+            print(f"[Tavily] key failed ({key[:10]}…): {exc}")
+            last_err = exc
+
+    raise RuntimeError(f"All Tavily API keys exhausted. Last error: {last_err}")
+
+
+# ── Search tool ──────────────────────────────────────────────────────────────
+
+@tool
+def web_search(query: str) -> str:
+    """Search the web for recent, reliable information on a topic."""
+    try:
+        results = _tavily_search(query, max_results=5)
+        if not results.get("results"):
+            return "No results found."
+
+        lines: list[str] = []
+        for r in results["results"]:
+            lines.append(
+                f"Title:   {r.get('title', 'N/A')}\n"
+                f"URL:     {r.get('url', 'N/A')}\n"
+                f"Snippet: {r.get('content', '')[:400]}\n"
+            )
+        return "\n----\n".join(lines)
+
+    except Exception as exc:
+        return f"[web_search error] {exc}"
+
+
+@tool
+def brave_search(query: str) -> str:
+    """Alias for `web_search` kept for compatibility with model tool calls.
+
+    Some LLM responses attempt to call a tool named `brave_search`.
+    Provide a thin wrapper so those tool calls are handled by the existing
+    Tavily-backed `web_search` implementation.
+    """
+    try:
+        return web_search(query)
+    except Exception as exc:
+        return f"[brave_search error] {exc}"
+
+
+# ── Scraper tool ─────────────────────────────────────────────────────────────
+
+_REMOVE_TAGS = {"script", "style", "nav", "footer", "header",
+                "aside", "noscript", "form", "button", "svg", "img"}
+
+_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/124.0.0.0 Safari/537.36"
+    ),
+    "Accept-Language": "en-US,en;q=0.9",
+}
+
+@tool
+def scrape_url(url: str) -> str:
+    """Scrape and return clean text content (≤4 000 chars) from a given URL."""
+    try:
+        resp = requests.get(url, timeout=12, headers=_HEADERS)
+        resp.raise_for_status()
+
+        soup = BeautifulSoup(resp.text, "lxml")
+
+        # Remove noise tags
+        for tag in soup(_REMOVE_TAGS):
+            tag.decompose()
+
+        # Prefer <article> / <main> if available
+        body = soup.find("article") or soup.find("main") or soup.body or soup
+
+        text = body.get_text(separator=" ", strip=True)
+
+        # Collapse whitespace
+        import re
+        text = re.sub(r"\s{2,}", " ", text)
+
+        return text[:4_000]
+
+    except requests.exceptions.Timeout:
+        return f"[scrape_url] Request timed out for: {url}"
+    except requests.exceptions.HTTPError as exc:
+        return f"[scrape_url] HTTP error {exc.response.status_code} for: {url}"
+    except Exception as exc:
+        return f"[scrape_url] Could not scrape {url}: {exc}"

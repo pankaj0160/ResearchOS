@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Settings</title>
+<style>
+    body { font-family: Arial, sans-serif; background: #f9f9f9; margin: 0; padding: 0; }
+    .container { max-width: 800px; margin: 50px auto; background: #fff; padding: 30px; border-radius: 10px; box-shadow: 0 0 10px rgba(0,0,0,0.1); }
+    h1 { text-align: center; }
+    label { display: block; margin: 15px 0 5px; }
+    input, select { width: 100%; padding: 8px; font-size: 1rem; }
+    button { margin-top: 20px; padding: 10px 20px; font-size: 1rem; cursor: pointer; }
+</style>
+</head>
+<body>
+<div class="container">
+    <h1>Settings</h1>
+    <form id="settingsForm">
+        <label for="username">Username</label>
+        <input type="text" id="username" placeholder="Enter your username" required>
+
+        <label for="email">Email</label>
+        <input type="email" id="email" placeholder="Enter your email" required>
+
+        <label for="theme">Theme</label>
+        <select id="theme">
+            <option value="light">Light</option>
+            <option value="dark">Dark</option>
+        </select>
+
+        <label for="notifications">Notifications</label>
+        <select id="notifications">
+            <option value="enabled">Enabled</option>
+            <option value="disabled">Disabled</option>
+        </select>
+
+        <button type="submit">Save Settings</button>
+    </form>
+    
+</div>
+
+<script>
+    const form = document.getElementById('settingsForm');
+    const result = document.getElementById('result');
+
+    // Load saved settings from localStorage
+    window.addEventListener('DOMContentLoaded', () => {
+        const savedSettings = JSON.parse(localStorage.getItem('settings'));
+        if(savedSettings) {
+            document.getElementById('username').value = savedSettings.username;
+            document.getElementById('email').value = savedSettings.email;
+            document.getElementById('theme').value = savedSettings.theme;
+            document.getElementById('notifications').value = savedSettings.notifications;
+        }
+    });
+
+    // Save settings
+    form.addEventListener('submit', (e) => {
+        e.preventDefault();
+        const settings = {
+            username: document.getElementById('username').value,
+            email: document.getElementById('email').value,
+            theme: document.getElementById('theme').value,
+            notifications: document.getElementById('notifications').value,
+        };
+        localStorage.setItem('settings', JSON.stringify(settings));
+        result.textContent = "Settings saved successfully!";
+    });
+</script>
+</body>
+</html>

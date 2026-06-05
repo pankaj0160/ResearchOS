@@ -1,0 +1,56 @@
+# =============================================================================
+# ResearchOS — Backend Dependencies
+# Python 3.12+
+# =============================================================================
+
+# ── Server ──
+fastapi>=0.115.0
+uvicorn[standard]>=0.32.0
+
+# ── Environment ──
+python-dotenv>=1.0.1
+pydantic>=2.7.0
+pydantic[email]>=2.7.0
+pydantic-settings>=2.3.0
+
+# ── LangChain core ──
+langchain>=0.3.14
+langchain-core>=0.3.28
+langchain-community>=0.3.14
+
+# ── LLM providers ──
+langchain-groq>=0.2.4
+groq>=0.13.0
+
+# ── ReAct agents ──
+langgraph>=0.2.60
+langgraph-checkpoint>=2.0.0
+
+# ── Tavily search ──
+langchain-tavily>=0.1.5
+tavily-python>=0.5.0
+
+# ── HTTP + HTML scraping ──
+requests>=2.32.3
+httpx>=0.28.0
+beautifulsoup4>=4.12.3
+lxml>=5.3.0
+
+# ── Database ──
+# sqlite3 is part of Python stdlib — no extra package needed
+
+# ── Phase 1 — Auth ──
+python-jose[cryptography]>=3.3.0
+passlib[bcrypt]>=1.7.4
+email-validator>=2.1.0
+
+# ── Dev / CLI ──
+rich>=13.9.0
+
+# ── Phase 2 — RAG ──
+chromadb>=0.5.0
+langchain-chroma>=0.1.4
+pypdf>=4.0.0
+sentence-transformers>=3.0.0
+python-multipart>=0.0.9
+aiofiles>=23.2.1
