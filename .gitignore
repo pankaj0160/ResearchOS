@@ -1,0 +1,251 @@
+# =========================
+
+# Python
+
+# =========================
+
+**pycache**/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# =========================
+
+# Virtual Environment
+
+# =========================
+
+.venv/
+venv/
+env/
+ENV/
+
+# =========================
+
+# Environment Variables
+
+# =========================
+
+.env
+.env.*
+!.env.example
+
+# =========================
+
+# FastAPI
+
+# =========================
+
+*.log
+logs/
+uvicorn.log
+
+# =========================
+
+# LangChain / AI
+
+# =========================
+
+.cache/
+langchain.db
+langchain_cache/
+*.sqlite3
+*.db
+
+# =========================
+
+# ChromaDB
+
+# =========================
+
+chroma/
+chroma_db/
+data/chroma/
+persist_directory/
+
+# =========================
+
+# Vector Databases
+
+# =========================
+
+vectorstore/
+vectorstores/
+faiss_index/
+*.faiss
+
+# =========================
+
+# Uploaded Files
+
+# =========================
+
+uploads/
+temp/
+tmp/
+storage/
+
+# =========================
+
+# PDF Processing
+
+# =========================
+
+processed_docs/
+ingested_docs/
+
+# =========================
+
+# PostgreSQL Dumps
+
+# =========================
+
+*.sql
+*.dump
+*.backup
+
+# =========================
+
+# Jupyter
+
+# =========================
+
+.ipynb_checkpoints/
+
+# =========================
+
+# VS Code
+
+# =========================
+
+.vscode/
+.history/
+
+# =========================
+
+# JetBrains
+
+# =========================
+
+.idea/
+
+# =========================
+
+# React / Vite
+
+# =========================
+
+node_modules/
+dist/
+build/
+.vite/
+
+# =========================
+
+# Testing
+
+# =========================
+
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
+
+# =========================
+
+# OS Files
+
+# =========================
+
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# =========================
+
+# TypeScript
+
+# =========================
+
+*.tsbuildinfo
+
+# =========================
+
+# Coverage Reports
+
+# =========================
+
+coverage/
+coverage.xml
+
+# =========================
+
+# Runtime Files
+
+# =========================
+
+*.pid
+*.seed
+*.out
+*.err
+
+# =========================
+
+# Secrets
+
+# =========================
+
+secrets/
+credentials/
+service-account.json
+google_credentials.json
+
+# =========================
+
+# AI Model Files
+
+# =========================
+
+models/
+checkpoints/
+weights/
+*.bin
+*.safetensors
+*.ckpt
+
+# =========================
+
+# ResearchOS Specific
+
+# =========================
+
+research_data/
+generated_reports/
+generated_summaries/
+exports/
+cache/
+
+# =========================
+
+# Logs
+
+# =========================
+
+*.log
+logs/
