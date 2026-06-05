@@ -495,7 +495,7 @@ function CreatorModal({ open, onClose, t }) {
               Close
             </button>
 
-            <button
+            <button link="https://github.com/pankaj0160/"
               style={{
                 padding: '11px 18px',
                 background: 'transparent',
