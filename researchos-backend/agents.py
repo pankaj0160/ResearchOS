@@ -14,18 +14,14 @@ load_dotenv(Path(__file__).parent / ".env", override=True)
 # Model constants
 # ─────────────────────────────────────────────────────────────────────────────
 
-# Models tested to produce valid JSON tool calls on Groq (in priority order).
-# llama-3.3-70b-versatile is intentionally excluded — it emits XML tool calls.
 TOOL_USE_MODELS: list[str] = [
-    "llama-3.1-70b-versatile",          # Primary: stable JSON tool-call support
-    "mixtral-8x7b-32768",               # Fallback 1: proven tool-call support
-    "llama-3.1-8b-instant",             # Fallback 2: fast, reliable
+    "llama-3.3-70b-versatile",          # Primary
+    "llama3-70b-8192",                  # Fallback 1
+    "llama-3.1-8b-instant",             # Fallback 2
 ]
 
-# For LCEL chains — no tool binding, pure text generation
 CHAIN_MODEL = "llama-3.3-70b-versatile"
 
-# Safety cap: max tool-call iterations per agent run
 MAX_TOOL_ITERATIONS = 6
 
 
@@ -43,9 +39,17 @@ GROQ_KEYS: list[str] = _load_keys("GROQ_API_KEYS")
 
 def _make_llm(model: str, temperature: float = 0) -> ChatGroq:
     """
-    Return the first working ChatGroq instance for the given model.
-    Validates each key with a lightweight ping before returning.
-    Raises RuntimeError if all keys fail.
+    Return a ChatGroq instance for the given model WITHOUT a validation ping.
+
+    Why no ping:
+      The original code called llm.invoke("ping") to validate each key.
+      This is a blocking Groq API round-trip that runs on the asyncio thread
+      pool — two pings (tool_llm + chain_llm) add ~2-4s of blocking I/O
+      before the pipeline even starts, and can cause the SSE stream to appear
+      hung or drop the connection on slow networks.
+
+      Key validity is checked implicitly on the first real call. If a key
+      fails there, the error surfaces as an SSE error event to the frontend.
     """
     if not GROQ_KEYS:
         raise RuntimeError(
@@ -53,20 +57,29 @@ def _make_llm(model: str, temperature: float = 0) -> ChatGroq:
             "Add it to backend/.env:\n  GROQ_API_KEYS=gsk_key1,gsk_key2"
         )
 
+    # Use the first key — failover happens at the agent level via TOOL_USE_MODELS
+    key = GROQ_KEYS[0]
+    print(f"[Groq] ✓  model={model}  key={key[:12]}…")
+    return ChatGroq(api_key=key, model=model, temperature=temperature)
+
+
+def _make_llm_with_failover(model: str, temperature: float = 0) -> ChatGroq:
+    """
+    Try every key for a given model. Falls back across keys on auth errors.
+    Used only when we need guaranteed key validation (e.g. after a 401).
+    """
     last_err: Exception | None = None
     for key in GROQ_KEYS:
         try:
             llm = ChatGroq(api_key=key, model=model, temperature=temperature)
-            llm.invoke("ping")                      # validate key is active
+            # Lightweight validation — only used in explicit failover path
+            llm.invoke("hi")
             print(f"[Groq] ✓  model={model}  key={key[:12]}…")
             return llm
         except Exception as exc:
             print(f"[Groq] ✗  model={model}  key={key[:12]}…  err={exc}")
             last_err = exc
-
-    raise RuntimeError(
-        f"All Groq keys exhausted for model={model}. Last error: {last_err}"
-    )
+    raise RuntimeError(f"All Groq keys exhausted for model={model}. Last error: {last_err}")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -76,8 +89,7 @@ def _make_llm(model: str, temperature: float = 0) -> ChatGroq:
 def get_tool_llm(temperature: float = 0) -> ChatGroq:
     """
     Return the best available LLM for tool-using agents.
-    Iterates TOOL_USE_MODELS until a working (model × key) pair is found.
-    Raises RuntimeError if every combination fails.
+    Iterates TOOL_USE_MODELS until a working model is found.
     """
     last_err: Exception | None = None
     for model in TOOL_USE_MODELS:
@@ -107,44 +119,17 @@ def _run_tool_loop(
     user_message: str,
     max_iterations: int = MAX_TOOL_ITERATIONS,
 ) -> str:
-    """
-    Runs a manual tool-calling loop using llm.bind_tools().
-
-    Why this instead of create_react_agent:
-      bind_tools() sends tool schemas as JSON to the model's native tool-call
-      API. The model returns AIMessage.tool_calls (already parsed JSON dicts).
-      We execute each tool, feed results back as ToolMessages, and loop until
-      the model returns a plain-text response.
-
-      create_react_agent injects a hidden ReAct system prompt that causes some
-      Groq models to produce XML-formatted tool calls, triggering HTTP 400.
-
-    Args:
-        llm          : A ChatGroq instance (tool-capable model).
-        tools        : List of @tool-decorated callables.
-        user_message : The task description for the agent.
-        max_iterations: Safety cap on tool-call rounds.
-
-    Returns:
-        Final plain-text response from the model.
-    """
-    # Map tool name → callable for fast lookup
-    tool_map: dict[str, any] = {t.name: t for t in tools}
-
-    # Bind JSON schemas — no hidden prompts
+    tool_map: dict[str, object] = {t.name: t for t in tools}
     llm_with_tools = llm.bind_tools(tools)
-
     messages: list = [HumanMessage(content=user_message)]
 
-    for iteration in range(max_iterations):
+    for _ in range(max_iterations):
         response: AIMessage = llm_with_tools.invoke(messages)
         messages.append(response)
 
-        # No tool calls → model produced its final answer
         if not getattr(response, "tool_calls", None):
             return response.content or ""
 
-        # Execute every requested tool call and return results
         for tool_call in response.tool_calls:
             name = tool_call["name"]
             args = tool_call["args"]
@@ -159,35 +144,17 @@ def _run_tool_loop(
                 except Exception as exc:
                     result_str = f"[Tool error] {name} failed: {exc}"
 
-            messages.append(
-                ToolMessage(content=result_str, tool_call_id=tid)
-            )
+            messages.append(ToolMessage(content=result_str, tool_call_id=tid))
 
-    # Max iterations reached — return the last AIMessage content we have
-    last_ai = next(
-        (m for m in reversed(messages) if isinstance(m, AIMessage)), None
-    )
+    last_ai = next((m for m in reversed(messages) if isinstance(m, AIMessage)), None)
     return last_ai.content if last_ai else "Agent reached max iterations without a final answer."
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Search Agent  (function, not class — returns string directly)
+# Search Agent
 # ─────────────────────────────────────────────────────────────────────────────
 
 def run_search_agent(topic: str, llm: ChatGroq | None = None) -> str:
-    """
-    Searches the web for recent information about `topic`.
-
-    Internally calls web_search via bind_tools loop.
-    Returns a formatted string of results (titles, URLs, snippets).
-
-    Args:
-        topic : Research topic string.
-        llm   : Optional pre-built tool LLM (omit to auto-build).
-
-    Returns:
-        Multi-line string of search results.
-    """
     if llm is None:
         llm = get_tool_llm()
 
@@ -206,7 +173,7 @@ def run_search_agent(topic: str, llm: ChatGroq | None = None) -> str:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Reader Agent  (function, not class — returns string directly)
+# Reader Agent
 # ─────────────────────────────────────────────────────────────────────────────
 
 def run_reader_agent(
@@ -214,20 +181,6 @@ def run_reader_agent(
     search_results: str,
     llm: ChatGroq | None = None,
 ) -> str:
-    """
-    Picks the best URL from `search_results` and scrapes its full content.
-
-    Internally calls scrape_url via bind_tools loop.
-    Returns extracted page text (up to 4 000 chars).
-
-    Args:
-        topic          : Research topic string (for relevance context).
-        search_results : Output from run_search_agent().
-        llm            : Optional pre-built tool LLM (omit to auto-build).
-
-    Returns:
-        Extracted page content as plain text.
-    """
     if llm is None:
         llm = get_tool_llm()
 
@@ -242,12 +195,11 @@ def run_reader_agent(
         f"3. Return the key extracted information in a structured format."
     )
 
-    # Include `brave_search` alias so models that attempt that tool name succeed.
     return _run_tool_loop(llm, tools=[scrape_url, brave_search], user_message=prompt)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Writer Chain  (LCEL — no tool binding)
+# Writer Chain
 # ─────────────────────────────────────────────────────────────────────────────
 
 _WRITER_PROMPT = ChatPromptTemplate.from_messages([
@@ -285,14 +237,13 @@ Rules:
 
 
 def build_writer_chain(llm: ChatGroq | None = None):
-    """LCEL chain: {topic, research} → Markdown report string."""
     if llm is None:
         llm = get_chain_llm()
     return _WRITER_PROMPT | llm | StrOutputParser()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Critic Chain  (LCEL — no tool binding)
+# Critic Chain
 # ─────────────────────────────────────────────────────────────────────────────
 
 _CRITIC_PROMPT = ChatPromptTemplate.from_messages([
@@ -330,7 +281,6 @@ your verdict here
 
 
 def build_critic_chain(llm: ChatGroq | None = None):
-    """LCEL chain: {report} → structured critique string."""
     if llm is None:
         llm = get_chain_llm()
     return _CRITIC_PROMPT | llm | StrOutputParser()

@@ -3,9 +3,11 @@ tools.py — Search & Scraper tools for OrchestrAI agents.
 
 - web_search  : Tavily-powered search with key failover
 - scrape_url  : BeautifulSoup HTML extractor with fallback handling
+- brave_search: Alias for web_search (model compatibility)
 """
 
 import os
+import re
 from dotenv import load_dotenv
 from langchain.tools import tool
 import requests
@@ -26,7 +28,6 @@ TAVILY_KEYS = _load_keys("TAVILY_API_KEYS")
 def _tavily_search(query: str, max_results: int = 5) -> dict:
     """
     Try each Tavily key in sequence; raise only when all fail.
-    Lazy-imports TavilyClient so the module doesn't crash when keys are absent.
     """
     try:
         from tavily import TavilyClient
@@ -70,16 +71,33 @@ def web_search(query: str) -> str:
 
 @tool
 def brave_search(query: str) -> str:
-    """Alias for `web_search` kept for compatibility with model tool calls.
-
-    Some LLM responses attempt to call a tool named `brave_search`.
-    Provide a thin wrapper so those tool calls are handled by the existing
-    Tavily-backed `web_search` implementation.
-    """
+    """Alias for web_search — handles model tool calls that use this name."""
     try:
-        return web_search(query)
+        # Call the underlying Tavily function directly (not the @tool wrapper)
+        # to avoid LangChain tool invocation signature issues
+        return _do_web_search(query)
     except Exception as exc:
         return f"[brave_search error] {exc}"
+
+
+def _do_web_search(query: str) -> str:
+    """Shared implementation used by both web_search and brave_search."""
+    try:
+        results = _tavily_search(query, max_results=5)
+        if not results.get("results"):
+            return "No results found."
+
+        lines: list[str] = []
+        for r in results["results"]:
+            lines.append(
+                f"Title:   {r.get('title', 'N/A')}\n"
+                f"URL:     {r.get('url', 'N/A')}\n"
+                f"Snippet: {r.get('content', '')[:400]}\n"
+            )
+        return "\n----\n".join(lines)
+
+    except Exception as exc:
+        return f"[web_search error] {exc}"
 
 
 # ── Scraper tool ─────────────────────────────────────────────────────────────
@@ -96,6 +114,7 @@ _HEADERS = {
     "Accept-Language": "en-US,en;q=0.9",
 }
 
+
 @tool
 def scrape_url(url: str) -> str:
     """Scrape and return clean text content (≤4 000 chars) from a given URL."""
@@ -105,17 +124,11 @@ def scrape_url(url: str) -> str:
 
         soup = BeautifulSoup(resp.text, "lxml")
 
-        # Remove noise tags
         for tag in soup(_REMOVE_TAGS):
             tag.decompose()
 
-        # Prefer <article> / <main> if available
         body = soup.find("article") or soup.find("main") or soup.body or soup
-
         text = body.get_text(separator=" ", strip=True)
-
-        # Collapse whitespace
-        import re
         text = re.sub(r"\s{2,}", " ", text)
 
         return text[:4_000]

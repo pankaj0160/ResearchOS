@@ -58,6 +58,11 @@ from database import delete_run, get_history, get_run, init_db, save_run
 from pipeline import run_pipeline_async
 from pathlib import Path
 
+# ── RAG / upload imports ───────────────────────────────────────────────────────
+from fastapi import UploadFile, File
+from uuid import uuid4
+from datetime import datetime
+
 load_dotenv(Path(__file__).parent / ".env", override=True)
 
 # ── Lifespan ──────────────────────────────────────────────────────────────────
@@ -248,9 +253,9 @@ async def research_stream(
         feedback = ""
         try:
             async for event in run_pipeline_async(topic):
-                if event.get("agent") == "writer" and event.get("type") == "chunk":
+                if event.get("agent") == "writer" and event.get("type") in ("chunk", "streaming"):
                     report += event.get("msg", "")
-                if event.get("agent") == "critic" and event.get("type") == "chunk":
+                if event.get("agent") == "critic" and event.get("type") in ("chunk", "streaming"):
                     feedback += event.get("msg", "")
                 yield f"data: {json.dumps(event)}\n\n"
 
@@ -271,116 +276,118 @@ async def research_stream(
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# AGENTS — Custom agent creator  [protected]
+# RAG
 # ══════════════════════════════════════════════════════════════════════════════
 
-class AgentCreateRequest(BaseModel):
-    name:          str
-    system_prompt: str
-    tools:         List[str]
-    model:         str
+UPLOAD_DIR = Path(__file__).parent / "uploads"
+UPLOAD_DIR.mkdir(exist_ok=True)
 
-    @field_validator("name")
-    @classmethod
-    def name_valid(cls, v: str) -> str:
-        v = v.strip()
-        if len(v) < 2:
-            raise ValueError("Agent name must be at least 2 characters")
-        if len(v) > 60:
-            raise ValueError("Agent name must be 60 characters or less")
-        return v
+from rag import (
+    ingest_pdf,
+    chat_with_pdf,
+    get_top_sources,
+    delete_session,
+)
 
-    @field_validator("system_prompt")
-    @classmethod
-    def prompt_not_empty(cls, v: str) -> str:
-        if not v.strip():
-            raise ValueError("System prompt cannot be empty")
-        return v.strip()
+# In-memory session store: session_id → {user_id, filename, created_at, history}
+_rag_sessions: dict[str, dict] = {}
 
 
-@app.post("/api/agents/create", status_code=status.HTTP_201_CREATED, tags=["Agents"])
-async def create_agent(req: AgentCreateRequest, current_user: CurrentUser):
-    """Create and persist a custom agent. Returns new agent id + name."""
-    agent_id = database.create_agent(
-        owner_id=current_user["id"],
-        name=req.name,
-        system_prompt=req.system_prompt,
-        tools=req.tools,
-        model=req.model,
-    )
-    return {"id": agent_id, "name": req.name, "message": "Agent deployed successfully"}
-
-
-@app.get("/api/agents/list", tags=["Agents"])
-async def list_agents(current_user: CurrentUser):
-    """Return all agents owned by the current user."""
-    agents = database.get_agents_by_user(current_user["id"])
-    return {"agents": agents}
-
-
-@app.delete("/api/agents/{agent_id}", tags=["Agents"])
-async def delete_agent(agent_id: int, current_user: CurrentUser):
-    """Delete an agent. Only the owner can delete."""
-    agent = database.get_agent_by_id(agent_id)
-    if not agent:
-        raise HTTPException(404, "Agent not found")
-    if agent["owner_id"] != current_user["id"]:
-        raise HTTPException(403, "Access denied")
-    database.delete_agent(agent_id)
-    return {"deleted": True, "id": agent_id}
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# SUPPORT — Ticket submission  [public]
-# ══════════════════════════════════════════════════════════════════════════════
-
-class SupportTicketRequest(BaseModel):
-    name:    str
-    email:   EmailStr
-    subject: str
-    message: str
-
-    @field_validator("name", "subject", "message")
-    @classmethod
-    def not_empty(cls, v: str) -> str:
-        if not v.strip():
-            raise ValueError("This field cannot be empty")
-        return v.strip()
-
-
-@app.post("/api/support/ticket", status_code=status.HTTP_201_CREATED, tags=["Support"])
-async def submit_ticket(req: SupportTicketRequest):
-    """Submit a support ticket. Public endpoint — no auth required."""
-    ticket_id = database.create_support_ticket(
-        name=req.name,
-        email=req.email,
-        subject=req.subject,
-        message=req.message,
-    )
-    print(f"[Support] New ticket #{ticket_id} from {req.email}: {req.subject}")
-    return {"status": "received", "ticket_id": ticket_id, "message": "We'll get back to you within 24 hours."}
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# RAG  (unchanged from your original — kept in full)
-# ══════════════════════════════════════════════════════════════════════════════
-
-from rag import ResearchRAG
-
-_rag = ResearchRAG()
-_rag_sessions: dict[str, dict] = {}   # session_id → {user_id, filename, history}
+class RagChatRequest(BaseModel):
+    session_id: str
+    question: str
 
 
 @app.post("/api/rag/upload", tags=["RAG"])
-async def rag_upload(current_user: CurrentUser):
-    """Placeholder — your original upload route goes here unchanged."""
-    raise HTTPException(501, "Use your original rag_upload implementation")
+async def rag_upload(
+    current_user: CurrentUser,
+    file: UploadFile = File(...),
+):
+    """
+    Accept a PDF upload, ingest it into the vector store, and return session metadata.
+
+    Flow:
+      Receive PDF → validate → generate session_id → save to disk
+      → call ingest_pdf() → store metadata in _rag_sessions → return metadata
+    """
+    # 1. Validate file type
+    if not file.filename or not file.filename.lower().endswith(".pdf"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Only PDF files are supported. Please upload a .pdf file.",
+        )
+
+    # 2. Generate a unique session ID and destination path
+    session_id = str(uuid4())
+    safe_filename = f"{session_id}_{file.filename}"
+    file_path = UPLOAD_DIR / safe_filename
+
+    # 3. Stream file to disk
+    try:
+        contents = await file.read()
+        if not contents:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Uploaded file is empty.",
+            )
+        file_path.write_bytes(contents)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to save uploaded file: {exc}",
+        )
+
+    # 4. Ingest the PDF into the vector store
+    try:
+        ingest_result = ingest_pdf(str(file_path), session_id=session_id)
+    except ValueError as exc:
+        # e.g. "PDF has no extractable text"
+        file_path.unlink(missing_ok=True)
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(exc),
+        )
+    except Exception as exc:
+        file_path.unlink(missing_ok=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to process PDF: {exc}",
+        )
+
+    # 5. Store session metadata
+    created_at = datetime.utcnow().isoformat()
+    _rag_sessions[session_id] = {
+        "user_id":    current_user["id"],
+        "filename":   file.filename,
+        "file_path":  str(file_path),
+        "created_at": created_at,
+        "history":    [],
+    }
+
+    # ingest_pdf should return a dict with at least page_count and chunk_count.
+    # If it returns something else, we handle both cases gracefully.
+    page_count  = ingest_result.get("page_count",  0) if isinstance(ingest_result, dict) else 0
+    chunk_count = ingest_result.get("chunk_count", 0) if isinstance(ingest_result, dict) else 0
+
+    return {
+        "session_id":  session_id,
+        "filename":    file.filename,
+        "page_count":  page_count,
+        "chunk_count": chunk_count,
+        "created_at":  created_at,
+    }
 
 
 @app.get("/api/rag/sessions", tags=["RAG"])
 async def rag_sessions(current_user: CurrentUser):
     user_sessions = [
-        {"session_id": sid, "filename": s.get("filename"), "created_at": s.get("created_at")}
+        {
+            "session_id": sid,
+            "filename":   s.get("filename"),
+            "created_at": s.get("created_at"),
+        }
         for sid, s in _rag_sessions.items()
         if s.get("user_id") == current_user["id"]
     ]
@@ -388,9 +395,69 @@ async def rag_sessions(current_user: CurrentUser):
 
 
 @app.post("/api/rag/chat", tags=["RAG"])
-async def rag_chat(body: dict, current_user: CurrentUser):
-    """Your original rag_chat implementation goes here unchanged."""
-    raise HTTPException(501, "Use your original rag_chat implementation")
+async def rag_chat(body: RagChatRequest, current_user: CurrentUser):
+    """
+    Stream an answer to a question grounded in the uploaded PDF.
+
+    Flow:
+      Validate session_id → check ownership → get question
+      → fetch top sources → stream answer from chat_with_pdf()
+      → save to history → send SSE events
+    """
+    # 1. Validate session exists
+    session = _rag_sessions.get(body.session_id)
+    if not session:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Session not found. Please upload a PDF first.",
+        )
+
+    # 2. Ownership check
+    if session["user_id"] != current_user["id"]:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+
+    # 3. Validate question
+    question = body.question.strip()
+    if not question:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Question cannot be empty.",
+        )
+
+    def event_stream():
+        full_answer = ""
+        try:
+            # 4. Retrieve relevant source chunks
+            try:
+                sources = get_top_sources(body.session_id, question)
+            except Exception:
+                sources = []
+
+            # Emit sources so the frontend can render citations
+            yield f"data: {json.dumps({'type': 'sources', 'sources': sources})}\n\n"
+
+            # 5. Stream the answer token-by-token (pass history for multi-turn context)
+            for chunk in chat_with_pdf(body.session_id, question, session.get("history", [])):
+                full_answer += chunk
+                yield f"data: {json.dumps({'type': 'chunk', 'chunk': chunk})}\n\n"
+
+            # 6. Persist Q&A to session history
+            session["history"].append((question, full_answer))
+
+            yield f"data: {json.dumps({'type': 'done'})}\n\n"
+
+        except Exception as exc:
+            yield f"data: {json.dumps({'type': 'error', 'msg': str(exc)})}\n\n"
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control":    "no-cache",
+            "X-Accel-Buffering": "no",
+            "Connection":       "keep-alive",
+        },
+    )
 
 
 @app.get("/api/rag/history/{session_id}", tags=["RAG"])
@@ -414,10 +481,21 @@ async def rag_delete_session(session_id: str, current_user: CurrentUser):
         raise HTTPException(404, "Session not found")
     if session["user_id"] != current_user["id"]:
         raise HTTPException(403, "Access denied")
+
+    # Remove from vector store
     try:
-        _rag.delete_session(session_id)
+        delete_session(session_id)
     except Exception:
         pass
+
+    # Remove file from disk
+    file_path = session.get("file_path")
+    if file_path:
+        try:
+            Path(file_path).unlink(missing_ok=True)
+        except Exception:
+            pass
+
     del _rag_sessions[session_id]
     return {"deleted": True, "session_id": session_id}
 

@@ -21,6 +21,7 @@ import ResearchPage                from './pages/ResearchPage'
 import PDFChatPage                 from './pages/PDFChatPage'
 import NewsPage                    from './pages/NewsPage'
 
+
 // ── Route guards ─────────────────────────────────────────────────────────────
 
 function LoadingScreen() {
@@ -73,6 +74,7 @@ function App() {
         <Route path="/research"  element={<ResearchPage />}    />
         <Route path="/pdf-chat"  element={<PDFChatPage />}     />
         <Route path="/news"      element={<NewsPage />}        />
+       
       </Route>
 
       {/* ── Fallback ── */}

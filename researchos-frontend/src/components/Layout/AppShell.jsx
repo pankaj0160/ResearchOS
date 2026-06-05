@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { Link, NavLink, Outlet, useNavigate } from 'react-router-dom'
 import { useAuth } from '../../context/AuthContext'
 import { useTheme } from '../../context/ThemeProvider'
@@ -7,116 +7,458 @@ const NAV = [
   {
     section: 'Workspace',
     items: [
-      { to: '/dashboard', icon: HomeIcon,     label: 'Dashboard'  },
-      { to: '/research',  icon: SearchIcon,   label: 'Research'   },
-      { to: '/pdf-chat',  icon: FileIcon,     label: 'PDF Chat'   },
-      { to: '/news',      icon: NewsIcon,     label: 'News'       },
-    ],
-  },
-  {
-    section: 'Account',
-    items: [
-      { to: '/settings',  icon: SettingsIcon, label: 'Settings'   },
+      { to: '/dashboard', icon: HomeIcon,   label: 'Dashboard' },
+      { to: '/research',  icon: SearchIcon, label: 'Research'  },
+      { to: '/pdf-chat',  icon: FileIcon,   label: 'PDF Chat'  },
+      { to: '/news',      icon: NewsIcon,   label: 'News'      },
     ],
   },
 ]
 
 export default function AppShell() {
-  const { user, logout }       = useAuth()
+  const { user, logout }        = useAuth()
   const { isDark, toggleTheme } = useTheme()
   const navigate                = useNavigate()
-  const [collapsed, setCollapsed] = useState(false)
+  const [collapsed, setCollapsed]     = useState(false)
   const [userMenuOpen, setUserMenuOpen] = useState(false)
+  const userMenuRef = useRef(null)
+
+  // Close user menu when clicking outside
+  useEffect(() => {
+    function handleClickOutside(e) {
+      if (userMenuRef.current && !userMenuRef.current.contains(e.target)) {
+        setUserMenuOpen(false)
+      }
+    }
+    if (userMenuOpen) document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [userMenuOpen])
 
   function handleLogout() {
     logout()
     navigate('/', { replace: true })
   }
 
+  // Derived color tokens — correct for both themes
+  const text       = isDark ? 'rgba(255,255,255,.85)' : 'rgba(15,15,25,.85)'
+  const textMuted  = isDark ? 'rgba(255,255,255,.45)' : 'rgba(15,15,25,.45)'
+  const border     = isDark ? 'rgba(255,255,255,.07)' : 'rgba(0,0,0,.09)'
+  const surface    = isDark ? '#0f0f19'               : '#ffffff'
+  const hoverBg    = isDark ? 'rgba(139,92,246,.10)'  : 'rgba(99,102,241,.08)'
+  const chevronBg  = isDark ? 'rgba(255,255,255,.07)' : 'rgba(0,0,0,.06)'
+  const chevronFg  = isDark ? 'rgba(255,255,255,.7)'  : 'rgba(15,15,25,.7)'
+
   return (
-    <div className={`shell${collapsed ? ' shell--collapsed' : ''}`}>
+    <div
+      style={{
+        display: 'flex',
+        height: '100vh',
+        overflow: 'hidden',
+        background: isDark ? '#07070f' : '#f4f4f8',
+      }}
+    >
       {/* ── Sidebar ── */}
-      <aside className="sidebar">
-        {/* Logo */}
-        <div className="sidebar-logo">
-          <Link to="/dashboard" className="sidebar-logo-link">
-            <span className="sidebar-logo-mark">R</span>
-            {!collapsed && <span className="sidebar-logo-text">ResearchOS</span>}
+      <aside
+        style={{
+          width: collapsed ? '72px' : '256px',
+          minWidth: collapsed ? '72px' : '256px',
+          height: '100vh',
+          display: 'flex',
+          flexDirection: 'column',
+          background: surface,
+          borderRight: `1px solid ${border}`,
+          transition: 'width .25s ease, min-width .25s ease',
+          overflow: 'hidden',
+          position: 'relative',
+          zIndex: 10,
+        }}
+      >
+        {/* ── Logo row ── */}
+        <div
+          style={{
+            padding: '0 12px',
+            borderBottom: `1px solid ${border}`,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            minHeight: '64px',
+            gap: '8px',
+            flexShrink: 0,
+          }}
+        >
+          <Link
+            to="/dashboard"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '10px',
+              textDecoration: 'none',
+              overflow: 'hidden',
+              minWidth: 0,
+            }}
+          >
+            {/* Logo mark */}
+            <div
+              style={{
+                width: '36px',
+                height: '36px',
+                borderRadius: '10px',
+                background: 'linear-gradient(135deg,#6366f1 0%,#8b5cf6 55%,#ec4899 100%)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                boxShadow: '0 0 18px rgba(139,92,246,.35)',
+                flexShrink: 0,
+              }}
+            >
+              <span style={{ color: '#fff', fontWeight: 900, fontSize: '1.1rem' }}>R</span>
+            </div>
+
+            {/* Logo text — hidden when collapsed */}
+            <span
+              style={{
+                fontSize: '1.55rem',
+                fontWeight: 900,
+                letterSpacing: '-0.04em',
+
+                ...(isDark
+                  ? {
+                      background:
+                        'linear-gradient(135deg,#ffffff,#d8b4fe)',
+                      WebkitBackgroundClip: 'text',
+                      WebkitTextFillColor: 'transparent',
+                    }
+                  : {
+                      color: '#111827',
+                    }),
+
+                whiteSpace: 'nowrap',
+                opacity: collapsed ? 0 : 1,
+                width: collapsed ? 0 : 'auto',
+                overflow: 'hidden',
+              }}
+            >
+              ResearchOS
+            </span>
+            
           </Link>
-          <button className="sidebar-collapse-btn" onClick={() => setCollapsed(v => !v)} aria-label="Toggle sidebar">
+
+          {/* Collapse toggle */}
+          <button
+            onClick={() => setCollapsed(v => !v)}
+            aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+            style={{
+              width: '32px',
+              height: '32px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              border: 'none',
+              borderRadius: '8px',
+              cursor: 'pointer',
+              flexShrink: 0,
+              background: chevronBg,
+              color: chevronFg,
+              transition: 'background .15s, color .15s',
+            }}
+            onMouseEnter={e => {
+              e.currentTarget.style.background = 'rgba(139,92,246,.15)'
+              e.currentTarget.style.color = '#8b5cf6'
+            }}
+            onMouseLeave={e => {
+              e.currentTarget.style.background = chevronBg
+              e.currentTarget.style.color = chevronFg
+            }}
+          >
             <ChevronIcon flipped={collapsed} />
           </button>
         </div>
 
-        {/* Navigation */}
-        <nav className="sidebar-nav">
+        {/* ── Navigation ── */}
+        <nav
+          style={{
+            flex: 1,
+            display: 'flex',
+            flexDirection: 'column',
+            padding: '16px 8px',
+            overflowY: 'auto',
+            overflowX: 'hidden',
+          }}
+        >
           {NAV.map(group => (
-            <div key={group.section} className="sidebar-nav-group">
-              {!collapsed && <span className="sidebar-nav-section">{group.section}</span>}
+            <div key={group.section}>
+              {/* Section label */}
+              {!collapsed && (
+                <div
+                  style={{
+                    padding: '0 12px',
+                    marginBottom: '6px',
+                    fontSize: '.69rem',
+                    textTransform: 'uppercase',
+                    letterSpacing: '.12em',
+                    fontWeight: 700,
+                    color: textMuted,
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  {group.section}
+                </div>
+              )}
+
               {group.items.map(item => (
                 <NavLink
                   key={item.to}
                   to={item.to}
+                  title={collapsed ? item.label : undefined}
                   className={({ isActive }) =>
                     `sidebar-nav-item${isActive ? ' sidebar-nav-item--active' : ''}`
                   }
+                  style={({ isActive }) => ({
+                    display: 'flex',
+                    alignItems: 'center',
+
+                    gap: '18px',              // increased icon-text spacing
+
+                    minHeight: '62px',        // larger row height
+
+                    padding: collapsed
+                      ? '0'
+                      : '0 18px',             // more horizontal padding
+
+                    justifyContent: collapsed
+                      ? 'center'
+                      : 'flex-start',
+
+                    marginBottom: '8px',      // more spacing between items
+
+                    borderRadius: '18px',
+
+                    textDecoration: 'none',
+
+                    color: isActive ? '#fff' : text,
+
+                    background: isActive
+                      ? 'linear-gradient(135deg, rgba(9, 123, 26, 0.75), rgba(139,92,246,.65))'
+                      : 'transparent',
+
+                    border: isActive
+                      ? '1px solid rgba(139,92,246,.35)'
+                      : '1px solid transparent',
+
+                    boxShadow: isActive
+                      ? '0 10px 30px rgba(99,102,241,.25)'
+                      : 'none',
+
+                    transition: 'all .22s ease',
+                  })}
+                  onMouseEnter={e => {
+                    // Only apply hover if not active (active has its own style)
+                    if (!e.currentTarget.classList.contains('sidebar-nav-item--active')) {
+                      e.currentTarget.style.background = hoverBg
+                    }
+                  }}
+                  onMouseLeave={e => {
+                    if (!e.currentTarget.classList.contains('sidebar-nav-item--active')) {
+                      e.currentTarget.style.background = 'transparent'
+                    }
+                  }}
                 >
                   <item.icon size={18} />
-                  {!collapsed && <span>{item.label}</span>}
+                  {!collapsed && (
+                    <span style={{ fontSize: '.93rem', fontWeight: 500, whiteSpace: 'nowrap' }}>
+                      {item.label}
+                    </span>
+                  )}
                 </NavLink>
               ))}
             </div>
           ))}
         </nav>
 
-        {/* Bottom: theme + user */}
-        <div className="sidebar-footer">
-          <button className="sidebar-nav-item sidebar-theme-btn" onClick={toggleTheme}>
-            {isDark ? <SunIcon size={18} /> : <MoonIcon size={18} />}
+        {/* ── Footer ── */}
+        <div
+          style={{
+            padding: '8px',
+            borderTop: `1px solid ${border}`,
+            flexShrink: 0,
+          }}
+        >
+          {/* Theme toggle */}
+          <button
+            onClick={toggleTheme}
+            title={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
+            style={{
+              width: '100%',
+              minHeight: '40px',
+              borderRadius: '10px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: collapsed ? 'center' : 'flex-start',
+              gap: '10px',
+              padding: collapsed ? '0' : '0 12px',
+              border: 'none',
+              background: 'transparent',
+              color: text,
+              cursor: 'pointer',
+              fontSize: '.9rem',
+              fontWeight: 500,
+              transition: 'background .15s',
+            }}
+            onMouseEnter={e => { e.currentTarget.style.background = hoverBg }}
+            onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}
+          >
+            {isDark ? <SunIcon size={17} /> : <MoonIcon size={17} />}
             {!collapsed && <span>{isDark ? 'Light mode' : 'Dark mode'}</span>}
           </button>
 
-          {/* User pill */}
-          <div className="sidebar-user" onClick={() => setUserMenuOpen(v => !v)}>
-            <div className="sidebar-avatar">
-              {user?.username?.[0]?.toUpperCase() ?? 'U'}
-            </div>
-            {!collapsed && (
-              <div className="sidebar-user-info">
-                <span className="sidebar-user-name">{user?.username}</span>
-                <span className="sidebar-user-email">{user?.email}</span>
+          {/* User menu trigger */}
+          <div style={{ position: 'relative', marginTop: '4px' }} ref={userMenuRef}>
+            <button
+              onClick={() => setUserMenuOpen(v => !v)}
+              aria-haspopup="true"
+              aria-expanded={userMenuOpen}
+              style={{
+                width: '100%',
+                minHeight: '52px',
+                borderRadius: '12px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: collapsed ? 'center' : 'flex-start',
+                gap: '10px',
+                padding: collapsed ? '0' : '0 10px',
+                border: `1px solid ${userMenuOpen ? 'rgba(139,92,246,.4)' : 'transparent'}`,
+                background: userMenuOpen ? hoverBg : 'transparent',
+                cursor: 'pointer',
+                transition: 'background .15s, border-color .15s',
+              }}
+              onMouseEnter={e => { e.currentTarget.style.background = hoverBg }}
+              onMouseLeave={e => {
+                if (!userMenuOpen) e.currentTarget.style.background = 'transparent'
+              }}
+            >
+              {/* Avatar */}
+              <div
+                style={{
+                  width: '34px',
+                  height: '34px',
+                  borderRadius: '9px',
+                  background: 'linear-gradient(135deg,#06b6d4,#14b8a6)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: '#fff',
+                  fontWeight: 700,
+                  fontSize: '1rem',
+                  flexShrink: 0,
+                }}
+              >
+                {user?.username?.[0]?.toUpperCase() ?? 'U'}
+              </div>
+
+              {!collapsed && (
+                <div style={{ overflow: 'hidden', textAlign: 'left', minWidth: 0 }}>
+                  <div
+                    style={{
+                      color: text,
+                      fontWeight: 600,
+                      fontSize: '.9rem',
+                      whiteSpace: 'nowrap',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                    }}
+                  >
+                    {user?.username ?? 'User'}
+                  </div>
+                  <div
+                    style={{
+                      color: textMuted,
+                      fontSize: '.78rem',
+                      whiteSpace: 'nowrap',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                    }}
+                  >
+                    {user?.email ?? ''}
+                  </div>
+                </div>
+              )}
+            </button>
+
+            {/* User dropdown menu */}
+            {userMenuOpen && (
+              <div
+                style={{
+                  position: 'absolute',
+                  bottom: 'calc(100% + 6px)',
+                  left: 0,
+                  right: 0,
+                  background: surface,
+                  border: `1px solid ${border}`,
+                  borderRadius: '12px',
+                  boxShadow: isDark
+                    ? '0 8px 32px rgba(0,0,0,.5)'
+                    : '0 8px 32px rgba(0,0,0,.12)',
+                  overflow: 'hidden',
+                  zIndex: 100,
+                  minWidth: collapsed ? '160px' : 'auto',
+                  ...(collapsed ? { left: '100%', bottom: 0, marginLeft: '8px', right: 'auto', width: '160px' } : {}),
+                }}
+              >
+                <div
+                  style={{
+                    padding: '4px',
+                  }}
+                >
+
+                  <div style={{ height: '1px', background: border, margin: '2px 0' }} />
+
+                  <button
+                    onClick={handleLogout}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '10px',
+                      padding: '10px 12px',
+                      borderRadius: '8px',
+                      color: '#f87171',
+                      fontSize: '.9rem',
+                      fontWeight: 500,
+                      background: 'transparent',
+                      border: 'none',
+                      cursor: 'pointer',
+                      width: '100%',
+                      textAlign: 'left',
+                      transition: 'background .12s',
+                    }}
+                    onMouseEnter={e => { e.currentTarget.style.background = 'rgba(248,113,113,.1)' }}
+                    onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}
+                  >
+                    <LogoutIcon size={16} />
+                    Sign out
+                  </button>
+                </div>
               </div>
             )}
           </div>
-
-          {/* User dropdown */}
-          {userMenuOpen && (
-            <>
-              <div className="sidebar-user-backdrop" onClick={() => setUserMenuOpen(false)} />
-              <div className="sidebar-user-menu">
-                <div className="sidebar-user-menu-header">
-                  <strong>{user?.username}</strong>
-                  <span>{user?.email}</span>
-                </div>
-                <button className="sidebar-user-menu-item sidebar-user-menu-item--danger" onClick={handleLogout}>
-                  <LogoutIcon size={15} />
-                  Sign out
-                </button>
-              </div>
-            </>
-          )}
         </div>
       </aside>
 
       {/* ── Main content ── */}
-      <div className="shell-main">
+      <main
+        style={{
+          flex: 1,
+          overflowY: 'auto',
+          padding: '32px 40px',
+          minWidth: 0,
+        }}
+      >
         <Outlet />
-      </div>
+      </main>
     </div>
   )
 }
 
-/* ── Inline SVG icons (no extra dep) ────────────────────────────────────── */
+/* ── Icons ─────────────────────────────────────────────────────────────── */
 
 function HomeIcon({ size = 20 }) {
   return (
@@ -202,7 +544,7 @@ function ChevronIcon({ size = 16, flipped }) {
       width={size} height={size} viewBox="0 0 24 24"
       fill="none" stroke="currentColor" strokeWidth="2"
       strokeLinecap="round" strokeLinejoin="round"
-      style={{ transform: flipped ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }}
+      style={{ transform: flipped ? 'rotate(180deg)' : 'none', transition: 'transform .2s' }}
     >
       <polyline points="15 18 9 12 15 6"/>
     </svg>

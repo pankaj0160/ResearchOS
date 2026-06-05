@@ -1,38 +1,43 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 export const AGENTS = ['search', 'reader', 'writer', 'critic', 'final']
 export const PIPELINE_STEPS = [
-  { key: 'search', label: 'Search', waiting: 'Waiting', running: 'Searching sources', done: 'Search Agent Completed' },
-  { key: 'reader', label: 'Read Sources', waiting: 'Waiting', running: 'Reading sources', done: 'Reader Agent Completed' },
-  { key: 'writer', label: 'Generate Report', waiting: 'Waiting', running: 'Generating report', done: 'Writer Agent Completed' },
-  { key: 'critic', label: 'Critique', waiting: 'Waiting', running: 'Reviewing quality', done: 'Critic Agent Completed' },
-  { key: 'final', label: 'Final Report', waiting: 'Waiting', running: 'Finalizing report', done: 'Report Generated' },
+  { key: 'search', label: 'Search',          waiting: 'Waiting', running: 'Searching sources',   done: 'Search Agent Completed'  },
+  { key: 'reader', label: 'Read Sources',    waiting: 'Waiting', running: 'Reading sources',     done: 'Reader Agent Completed'  },
+  { key: 'writer', label: 'Generate Report', waiting: 'Waiting', running: 'Generating report',   done: 'Writer Agent Completed'  },
+  { key: 'critic', label: 'Critique',        waiting: 'Waiting', running: 'Reviewing quality',   done: 'Critic Agent Completed'  },
+  { key: 'final',  label: 'Final Report',    waiting: 'Waiting', running: 'Finalizing report',   done: 'Report Generated'        },
 ]
 
-const RAW_LOG_LIMIT = 1000
-const STREAM_TIMEOUT_MS = 120000
+const RAW_LOG_LIMIT    = 1000
+const STREAM_TIMEOUT_MS = 120_000
 
-const initialSteps = () => PIPELINE_STEPS.reduce((acc, step) => {
-  acc[step.key] = { status: 'idle', message: step.waiting }
-  return acc
-}, {})
+const initialSteps = () =>
+  PIPELINE_STEPS.reduce((acc, step) => {
+    acc[step.key] = { status: 'idle', message: step.waiting }
+    return acc
+  }, {})
 
 export function useSSEStream() {
-  const [rawLogs, setRawLogs] = useState([])
+  const [rawLogs,   setRawLogs]   = useState([])
   const [milestones, setMilestones] = useState([])
-  const [steps, setSteps] = useState(initialSteps)
-  const [report, setReport] = useState('')
-  const [feedback, setFeedback] = useState('')
+  const [steps,     setSteps]     = useState(initialSteps)
+  const [report,    setReport]    = useState('')
+  const [feedback,  setFeedback]  = useState('')
   const [runStatus, setRunStatus] = useState('idle')
-  const [error, setError] = useState(null)
-  const [topic, setTopic] = useState('')
-  const [runId, setRunId] = useState(null)
+  const [error,     setError]     = useState(null)
+  const [topic,     setTopic]     = useState('')
+  const [runId,     setRunId]     = useState(null)
 
   const eventSourceRef = useRef(null)
-  const timeoutRef = useRef(null)
-  const seqRef = useRef(0)
-  const reportRef = useRef('')
-  const feedbackRef = useRef('')
-  const lastTopicRef = useRef('')
+  const timeoutRef     = useRef(null)
+  const seqRef         = useRef(0)
+  const reportRef      = useRef('')
+  const feedbackRef    = useRef('')
+  const lastTopicRef   = useRef('')
+  // KEY FIX: track whether we received a clean 'done' event from the server.
+  // onerror fires on EVERY close — including clean server-side closes.
+  // Without this flag every successful run ends with "Connection lost".
+  const streamDoneRef  = useRef(false)
 
   const closeStream = useCallback(() => {
     if (eventSourceRef.current) {
@@ -62,10 +67,7 @@ export function useSSEStream() {
   }, [])
 
   const patchStep = useCallback((key, patch) => {
-    setSteps((prev) => ({
-      ...prev,
-      [key]: { ...prev[key], ...patch },
-    }))
+    setSteps((prev) => ({ ...prev, [key]: { ...prev[key], ...patch } }))
   }, [])
 
   const failRun = useCallback((message, agent = 'system') => {
@@ -80,17 +82,19 @@ export function useSSEStream() {
   }, [closeStream, patchStep, pushMilestone])
 
   const handleEvent = useCallback((event) => {
-    const agent = event.agent || 'system'
-    const type = event.type || 'message'
-    const message = event.msg || ''
+    const agent   = event.agent || 'system'
+    const type    = event.type  || 'message'
+    const message = event.msg   || ''
 
     pushRawLog(event)
 
+    // ── Error event ──────────────────────────────────────────────────────────
     if (type === 'error') {
       failRun(message, agent)
       return
     }
 
+    // ── Writer streaming chunks ───────────────────────────────────────────────
     if (agent === 'writer' && type === 'streaming') {
       reportRef.current += message
       setReport(reportRef.current)
@@ -99,6 +103,7 @@ export function useSSEStream() {
       return
     }
 
+    // ── Critic streaming chunks ───────────────────────────────────────────────
     if (agent === 'critic' && type === 'streaming') {
       feedbackRef.current += message
       setFeedback(feedbackRef.current)
@@ -106,26 +111,72 @@ export function useSSEStream() {
       return
     }
 
-    if (type === 'final_report') {
-      const finalReport = typeof event.report === 'string' ? event.report : reportRef.current
-      const finalFeedback = typeof event.feedback === 'string' ? event.feedback : feedbackRef.current
-
-      reportRef.current = finalReport
-      feedbackRef.current = finalFeedback
-      setReport(finalReport)
-      setFeedback(finalFeedback)
+    // ── Saved event (backend persisted the run) ───────────────────────────────
+    if (type === 'saved') {
       setRunId(event.run_id || null)
-      patchStep('writer', { status: finalReport.trim() ? 'done' : 'error', message: finalReport.trim() ? 'Writer Agent Completed' : 'Empty report returned' })
-      patchStep('critic', { status: 'done', message: 'Critic Agent Completed' })
-      patchStep('final', { status: finalReport.trim() ? 'done' : 'error', message: finalReport.trim() ? 'Report Generated' : 'No report content was returned' })
-      pushMilestone(finalReport.trim() ? 'Report Generated' : 'No report content was returned', finalReport.trim() ? 'done' : 'error')
-      setRunStatus(finalReport.trim() ? 'completed' : 'failed')
-      if (!finalReport.trim()) setError('The pipeline finished but returned an empty report. Please retry.')
+      return
+    }
+
+    // ── Done event — clean stream end ─────────────────────────────────────────
+    // This is sent by main.py as the very last SSE event.
+    // Setting streamDoneRef.current = true BEFORE closeStream() ensures that
+    // when the browser fires onerror (which it always does on close), we
+    // suppress the "connection lost" error message.
+    if (type === 'done') {
+      streamDoneRef.current = true
+
+      const hasReport   = reportRef.current.trim().length > 0
+      const hasFeedback = feedbackRef.current.trim().length > 0
+
+      patchStep('writer', {
+        status:  hasReport ? 'done' : 'error',
+        message: hasReport ? 'Writer Agent Completed' : 'Empty report returned',
+      })
+      patchStep('critic', {
+        status:  hasFeedback ? 'done' : 'done', // critic done regardless
+        message: 'Critic Agent Completed',
+      })
+      patchStep('final', {
+        status:  hasReport ? 'done' : 'error',
+        message: hasReport ? 'Report Generated' : 'No report content was returned',
+      })
+
+      pushMilestone(hasReport ? 'Report Generated' : 'No report content', hasReport ? 'done' : 'error')
+      setRunStatus(hasReport ? 'completed' : 'failed')
+      if (!hasReport) setError('The pipeline finished but returned an empty report. Please retry.')
+
       closeStream()
       return
     }
 
+    // ── final_report event (optional explicit payload) ────────────────────────
+    if (type === 'final_report') {
+      streamDoneRef.current = true
+
+      const finalReport    = typeof event.report   === 'string' ? event.report   : reportRef.current
+      const finalFeedback  = typeof event.feedback === 'string' ? event.feedback : feedbackRef.current
+
+      reportRef.current   = finalReport
+      feedbackRef.current = finalFeedback
+      setReport(finalReport)
+      setFeedback(finalFeedback)
+      setRunId(event.run_id || null)
+
+      const hasReport = finalReport.trim().length > 0
+      patchStep('writer', { status: hasReport ? 'done' : 'error', message: hasReport ? 'Writer Agent Completed' : 'Empty report returned' })
+      patchStep('critic', { status: 'done', message: 'Critic Agent Completed' })
+      patchStep('final',  { status: hasReport ? 'done' : 'error', message: hasReport ? 'Report Generated' : 'No report content was returned' })
+      pushMilestone(hasReport ? 'Report Generated' : 'No report content', hasReport ? 'done' : 'error')
+      setRunStatus(hasReport ? 'completed' : 'failed')
+      if (!hasReport) setError('The pipeline finished but returned an empty report. Please retry.')
+
+      closeStream()
+      return
+    }
+
+    // ── system complete (legacy fallback) ─────────────────────────────────────
     if (agent === 'system' && type === 'complete') {
+      streamDoneRef.current = true
       if (reportRef.current.trim()) {
         patchStep('final', { status: 'done', message: 'Report Generated' })
         setRunStatus('completed')
@@ -134,6 +185,7 @@ export function useSSEStream() {
       return
     }
 
+    // ── Per-agent events ──────────────────────────────────────────────────────
     if (!stepsKey(agent)) return
 
     if (type === 'thinking' || type === 'tool_call' || type === 'result') {
@@ -151,6 +203,10 @@ export function useSSEStream() {
       if (agent === 'writer') {
         patchStep('final', { status: 'running', message: 'Preparing final report' })
       }
+      // When critic completes, move final to running state
+      if (agent === 'critic') {
+        patchStep('final', { status: 'running', message: 'Preparing final report' })
+      }
     }
   }, [closeStream, failRun, milestones.length, patchStep, pushMilestone, pushRawLog])
 
@@ -159,10 +215,11 @@ export function useSSEStream() {
     if (!cleanTopic) return
 
     closeStream()
-    seqRef.current = 0
-    reportRef.current = ''
+    seqRef.current      = 0
+    reportRef.current   = ''
     feedbackRef.current = ''
     lastTopicRef.current = cleanTopic
+    streamDoneRef.current = false  // reset for new run
 
     setTopic(cleanTopic)
     setRawLogs([])
@@ -177,7 +234,7 @@ export function useSSEStream() {
     setRunId(null)
     setRunStatus('loading')
 
-    const token = localStorage.getItem('researchos_token')
+    const token  = localStorage.getItem('researchos_token')
     const source = new EventSource(
       `/api/research/stream?topic=${encodeURIComponent(cleanTopic)}${token ? `&token=${token}` : ''}`
     )
@@ -192,25 +249,30 @@ export function useSSEStream() {
       patchStep('search', { status: 'running', message: 'Searching sources' })
     }
 
-    source.onmessage = (event) => {
+    source.onmessage = (e) => {
       try {
-        handleEvent(JSON.parse(event.data))
+        handleEvent(JSON.parse(e.data))
       } catch {
         pushRawLog({ agent: 'system', type: 'error', msg: 'Received an unreadable stream event.' })
       }
     }
 
     source.onerror = () => {
+      // The browser EventSource fires onerror on EVERY close — including a
+      // normal server-side close after sending all events. We only treat it
+      // as a real error if we never received the 'done' sentinel event.
+      if (streamDoneRef.current) return
       failRun('Connection lost. Check that the backend is running and retry.', 'system')
     }
   }, [closeStream, failRun, handleEvent, patchStep, pushRawLog])
 
   const reset = useCallback(() => {
     closeStream()
-    seqRef.current = 0
-    reportRef.current = ''
-    feedbackRef.current = ''
-    lastTopicRef.current = ''
+    seqRef.current        = 0
+    reportRef.current     = ''
+    feedbackRef.current   = ''
+    lastTopicRef.current  = ''
+    streamDoneRef.current = false
     setRawLogs([])
     setMilestones([])
     setSteps(initialSteps())
@@ -240,7 +302,7 @@ export function useSSEStream() {
     topic,
     runId,
     isRunning: runStatus === 'loading' || runStatus === 'running' || runStatus === 'generating_report',
-    isDone: runStatus === 'completed',
+    isDone:    runStatus === 'completed',
     start,
     reset,
     retry,

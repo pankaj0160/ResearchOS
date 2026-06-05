@@ -13,13 +13,11 @@ import os
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError, jwt
 
-
 import database
-
 
 
 # ── Config ────────────────────────────────────────────────────────────────────
@@ -63,7 +61,9 @@ def decode_token(token: str) -> dict | None:
 
 # ── FastAPI dependency ────────────────────────────────────────────────────────
 
-_bearer = HTTPBearer(auto_error=True)
+# auto_error=False so we can fall through to the ?token= query param fallback
+# instead of getting an automatic 403 when the header is absent.
+_bearer = HTTPBearer(auto_error=False)
 
 _CREDENTIALS_EXCEPTION = HTTPException(
     status_code=status.HTTP_401_UNAUTHORIZED,
@@ -73,16 +73,33 @@ _CREDENTIALS_EXCEPTION = HTTPException(
 
 
 async def get_current_user(
-    creds: HTTPAuthorizationCredentials = Depends(_bearer),
+    request: Request,
+    creds: HTTPAuthorizationCredentials | None = Depends(_bearer),
 ) -> dict:
     """
-    FastAPI dependency that extracts and validates the JWT from the
-    Authorization: Bearer <token> header.
+    FastAPI dependency that extracts and validates the JWT from either:
+      1. Authorization: Bearer <token>  header  (standard REST calls)
+      2. ?token=<token>                 query param (SSE streams via EventSource)
+
+    EventSource / browser SSE cannot set custom headers, so the frontend
+    appends the JWT as a query parameter for streaming endpoints.
 
     Returns the user row dict from the database.
     Raises HTTP 401 if the token is missing, invalid, or the user doesn't exist.
     """
-    payload = decode_token(creds.credentials)
+    # 1. Try Authorization header first
+    token: str | None = None
+    if creds and creds.credentials:
+        token = creds.credentials
+
+    # 2. Fall back to ?token= query parameter (used by SSE / EventSource)
+    if not token:
+        token = request.query_params.get("token")
+
+    if not token:
+        raise _CREDENTIALS_EXCEPTION
+
+    payload = decode_token(token)
     if not payload:
         raise _CREDENTIALS_EXCEPTION
 

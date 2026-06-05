@@ -1,6 +1,7 @@
 import asyncio
 import os
 import time
+import traceback
 from typing import AsyncGenerator, Generator
 
 from dotenv import load_dotenv
@@ -13,14 +14,12 @@ load_dotenv(Path(__file__).parent / ".env", override=True)
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _has_real_keys() -> bool:
-    """True only when both GROQ and TAVILY keys are present in environment."""
     groq   = [k for k in os.getenv("GROQ_API_KEYS",   "").split(",") if k.strip()]
     tavily = [k for k in os.getenv("TAVILY_API_KEYS",  "").split(",") if k.strip()]
     return bool(groq and tavily)
 
 
 def _ev(agent: str, type_: str, msg: str, tool: str | None = None) -> dict:
-    """Construct a single SSE event dict."""
     return {"agent": agent, "type": type_, "msg": msg, "tool": tool}
 
 
@@ -29,19 +28,11 @@ def _ev(agent: str, type_: str, msg: str, tool: str | None = None) -> dict:
 # ═════════════════════════════════════════════════════════════════════════════
 
 def run_real_pipeline(topic: str) -> Generator[dict, None, None]:
-    """
-    Synchronous generator. Yields SSE event dicts in execution order.
-
-    Uses two LLM instances:
-      tool_llm  — llama-3.1-70b-versatile (JSON tool calls via bind_tools)
-      chain_llm — llama-3.3-70b-versatile (text generation, no tools)
-    """
-    # Lazy import — keeps module importable even without keys installed
     from agents import (
         get_tool_llm,
         get_chain_llm,
-        run_search_agent,    # NEW: returns str directly
-        run_reader_agent,    # NEW: returns str directly
+        run_search_agent,
+        run_reader_agent,
         build_writer_chain,
         build_critic_chain,
     )
@@ -63,9 +54,11 @@ def run_real_pipeline(topic: str) -> Generator[dict, None, None]:
     yield _ev("search", "tool_call", f'web_search("{topic}")', tool="web_search")
 
     try:
-        # run_search_agent returns a plain string — no .invoke() / message parsing
+        print(f"[Pipeline] Starting search agent for: {topic!r}")
         state["search_results"] = run_search_agent(topic=topic, llm=tool_llm)
+        print(f"[Pipeline] Search agent done — {len(state['search_results'])} chars")
     except Exception as exc:
+        print(f"[Pipeline] Search agent EXCEPTION:\n{traceback.format_exc()}")
         yield _ev("search", "error", f"Search agent failed: {exc}")
         return
 
@@ -79,14 +72,15 @@ def run_real_pipeline(topic: str) -> Generator[dict, None, None]:
               "scrape_url(best source from results)", tool="scrape_url")
 
     try:
-        # run_reader_agent returns a plain string — no .invoke() / message parsing
+        print(f"[Pipeline] Starting reader agent...")
         state["scraped_content"] = run_reader_agent(
             topic=topic,
             search_results=state["search_results"],
             llm=tool_llm,
         )
+        print(f"[Pipeline] Reader agent done — {len(state['scraped_content'])} chars")
     except Exception as exc:
-        # Non-fatal: reader failure degrades gracefully
+        print(f"[Pipeline] Reader agent EXCEPTION:\n{traceback.format_exc()}")
         yield _ev("reader", "error",
                   f"Reader failed ({exc}) — continuing with search data only")
         state["scraped_content"] = (
@@ -107,13 +101,16 @@ def run_real_pipeline(topic: str) -> Generator[dict, None, None]:
     )
 
     try:
+        print(f"[Pipeline] Starting writer chain...")
         writer_chain  = build_writer_chain(chain_llm)
         report_chunks: list[str] = []
         for chunk in writer_chain.stream({"topic": topic, "research": research_combined}):
             report_chunks.append(chunk)
             yield _ev("writer", "streaming", chunk)
         state["report"] = "".join(report_chunks)
+        print(f"[Pipeline] Writer chain done — {len(state['report'])} chars")
     except Exception as exc:
+        print(f"[Pipeline] Writer chain EXCEPTION:\n{traceback.format_exc()}")
         yield _ev("writer", "error", f"Writer chain failed: {exc}")
         return
 
@@ -124,21 +121,25 @@ def run_real_pipeline(topic: str) -> Generator[dict, None, None]:
               "Evaluating report quality, factual consistency, and structure...")
 
     try:
+        print(f"[Pipeline] Starting critic chain...")
         critic_chain    = build_critic_chain(chain_llm)
         feedback_chunks: list[str] = []
         for chunk in critic_chain.stream({"report": state["report"]}):
             feedback_chunks.append(chunk)
             yield _ev("critic", "streaming", chunk)
         state["feedback"] = "".join(feedback_chunks)
+        print(f"[Pipeline] Critic chain done — {len(state['feedback'])} chars")
     except Exception as exc:
+        print(f"[Pipeline] Critic chain EXCEPTION:\n{traceback.format_exc()}")
         yield _ev("critic", "error", f"Critic chain failed: {exc}")
         return
 
     yield _ev("critic", "complete", "Critique complete — pipeline finished")
+    print(f"[Pipeline] All steps complete for topic: {topic!r}")
 
 
 # ═════════════════════════════════════════════════════════════════════════════
-# SIMULATION PIPELINE  (no API keys required)
+# SIMULATION PIPELINE
 # ═════════════════════════════════════════════════════════════════════════════
 
 _SIM_REPORT = """\
@@ -201,7 +202,6 @@ A solid, well-structured report that establishes context effectively and would b
 
 
 def _stream_words(text: str, topic: str, delay: float = 0.014) -> Generator[str, None, None]:
-    """Yield text word-by-word for realistic streaming simulation."""
     filled = text.replace("{topic}", topic)
     for word in filled.split(" "):
         yield word + " "
@@ -209,13 +209,8 @@ def _stream_words(text: str, topic: str, delay: float = 0.014) -> Generator[str,
 
 
 def run_simulation_pipeline(topic: str) -> Generator[dict, None, None]:
-    """
-    Deterministic fake pipeline — every agent step, every event, zero API calls.
-    Activates automatically when GROQ_API_KEYS or TAVILY_API_KEYS are absent.
-    """
     def pause(s: float): time.sleep(s)
 
-    # ── Search ────────────────────────────────────────────────────────────────
     yield _ev("search", "thinking", f'Formulating search strategy for: "{topic}"')
     pause(0.6)
     yield _ev("search", "tool_call", f'web_search("{topic}")', tool="web_search")
@@ -225,7 +220,6 @@ def run_simulation_pipeline(topic: str) -> Generator[dict, None, None]:
     yield _ev("search", "complete", "Search phase complete")
     pause(0.4)
 
-    # ── Reader ────────────────────────────────────────────────────────────────
     yield _ev("reader", "thinking", "Selecting highest-relevance URL from search results...")
     pause(0.7)
     yield _ev("reader", "tool_call",
@@ -236,7 +230,6 @@ def run_simulation_pipeline(topic: str) -> Generator[dict, None, None]:
     yield _ev("reader", "complete", "Reader phase complete")
     pause(0.4)
 
-    # ── Writer ────────────────────────────────────────────────────────────────
     yield _ev("writer", "thinking", "Synthesising research into structured Markdown report...")
     pause(0.6)
     for chunk in _stream_words(_SIM_REPORT, topic, delay=0.012):
@@ -245,7 +238,6 @@ def run_simulation_pipeline(topic: str) -> Generator[dict, None, None]:
     yield _ev("writer", "complete", "Report drafted successfully")
     pause(0.4)
 
-    # ── Critic ────────────────────────────────────────────────────────────────
     yield _ev("critic", "thinking",
               "Evaluating report quality, factual consistency, and structure...")
     pause(0.8)
@@ -256,23 +248,21 @@ def run_simulation_pipeline(topic: str) -> Generator[dict, None, None]:
 
 
 # ═════════════════════════════════════════════════════════════════════════════
-# ASYNC WRAPPER  —  bridges sync generators → FastAPI SSE
+# ASYNC WRAPPER — bridges sync generators → FastAPI SSE
 # ═════════════════════════════════════════════════════════════════════════════
 
 async def run_pipeline_async(topic: str) -> AsyncGenerator[dict, None]:
     """
     Wraps synchronous pipeline generators into an async generator for FastAPI SSE.
 
-    Threading model:
-      Sync generators contain blocking I/O (Groq API, HTTP scraping, time.sleep).
-      Running them on the asyncio thread would freeze all concurrent requests.
-      Solution: run in ThreadPoolExecutor; feed events into asyncio.Queue.
-
-    True streaming (not batched):
-      WRONG:  await run_in_executor(...)  ← blocks until ALL events produced
-      RIGHT:  fire thread without await; drain queue concurrently
-              Events arrive at the frontend as each step completes.
+    Key fix vs original:
+      Added asyncio.wait_for() with a per-item timeout on queue.get() so a
+      hung pipeline thread never blocks the SSE stream forever — after
+      ITEM_TIMEOUT seconds of silence an error event is emitted and the stream
+      closes cleanly instead of hanging until the client drops the connection.
     """
+    ITEM_TIMEOUT = 120  # seconds to wait for the next event before giving up
+
     loop = asyncio.get_running_loop()
 
     use_sim = not _has_real_keys()
@@ -286,29 +276,36 @@ async def run_pipeline_async(topic: str) -> AsyncGenerator[dict, None]:
     queue: asyncio.Queue[dict | None] = asyncio.Queue()
 
     def _consume() -> None:
-        """Runs in ThreadPoolExecutor. Pushes events into queue thread-safely."""
         try:
             for event in gen:
                 loop.call_soon_threadsafe(queue.put_nowait, event)
         except Exception as exc:
+            err_msg = f"Unhandled pipeline error: {exc}\n{traceback.format_exc()}"
+            print(f"[Pipeline] _consume EXCEPTION:\n{err_msg}")
             err = _ev("system", "error", f"Unhandled pipeline error: {exc}")
             loop.call_soon_threadsafe(queue.put_nowait, err)
         finally:
-            # None = sentinel: tells async consumer the stream is done
+            print("[Pipeline] _consume finished — sending sentinel")
             loop.call_soon_threadsafe(queue.put_nowait, None)
 
-    # Fire thread WITHOUT awaiting — allows concurrent queue drain
     thread_task = loop.run_in_executor(None, _consume)
 
-    # Drain live as events arrive
     while True:
-        item = await queue.get()
-        if item is None:          # sentinel
+        try:
+            item = await asyncio.wait_for(queue.get(), timeout=ITEM_TIMEOUT)
+        except asyncio.TimeoutError:
+            print(f"[Pipeline] Queue timeout after {ITEM_TIMEOUT}s — pipeline thread hung")
+            yield _ev("system", "error",
+                      f"Pipeline timed out after {ITEM_TIMEOUT}s of inactivity. "
+                      f"This usually means the LLM API is unresponsive. Please retry.")
+            break
+
+        if item is None:
+            print("[Pipeline] Sentinel received — stream complete")
             break
         yield item
 
-    # Clean up thread
     try:
-        await thread_task
+        await asyncio.wait_for(thread_task, timeout=5)
     except Exception:
-        pass  # errors already emitted as SSE error events
+        pass
