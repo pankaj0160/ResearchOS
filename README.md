@@ -1,10 +1,3 @@
-<div align="center">
-
-<br />
-
-<img src="https://img.shields.io/badge/R-ResearchOS-0d9488?style=for-the-badge&logoColor=white&labelColor=0a0a0f" alt="ResearchOS" height="48" />
-
-<br /><br />
 
 # ResearchOS
 
@@ -24,6 +17,10 @@
 [![License](https://img.shields.io/badge/License-MIT-22c55e?style=flat-square)](LICENSE)
 
 <br />
+
+
+<img width="1919" height="1079" alt="Screenshot 2026-06-06 065918" src="https://github.com/user-attachments/assets/a7dd6615-32e1-4efa-9084-7e8c723b9f0a" />
+
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
