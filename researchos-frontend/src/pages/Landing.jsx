@@ -495,7 +495,8 @@ function CreatorModal({ open, onClose, t }) {
               Close
             </button>
 
-            <button link="https://github.com/pankaj0160/"
+            <button
+              onClick={() => window.open('https://github.com/pankaj0160', '_blank')}
               style={{
                 padding: '11px 18px',
                 background: 'transparent',
