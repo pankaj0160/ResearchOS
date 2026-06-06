@@ -45,7 +45,8 @@ ENV/
 .env.*
 !.env.example
 researchos-backend/.env
-
+node_modules/
+dist/
 # =========================
 
 # FastAPI
