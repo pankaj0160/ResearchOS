@@ -40,9 +40,9 @@
 
 
 <br />
-<br />
 
-
+---
+```
 ┌─────────────────────────────────────────────────────────────┐
 │   Search Agent → Reader Agent → Writer Agent → Critic Agent │
 │        web          scrape         report         score      │
