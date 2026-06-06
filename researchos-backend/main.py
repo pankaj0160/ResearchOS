@@ -86,6 +86,7 @@ _ORIGINS = [
     "http://localhost:5173",
     "http://localhost:3000",
     "http://localhost:4173",
+    "https://research-os-kappa.vercel.app",
     os.getenv("FRONTEND_ORIGIN", ""),
 ]
 
