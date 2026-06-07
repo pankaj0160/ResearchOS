@@ -38,24 +38,30 @@ export default function AppShell() {
     navigate('/', { replace: true })
   }
 
-  const text       = isDark ? 'rgba(255,255,255,.85)' : 'rgba(15,15,25,.85)'
-  const textMuted  = isDark ? 'rgba(255,255,255,.45)' : 'rgba(15,15,25,.45)'
-  const border     = isDark ? 'rgba(255,255,255,.07)' : 'rgba(0,0,0,.09)'
-  const surface    = isDark ? '#0f0f19'               : '#ffffff'
-  const hoverBg    = isDark ? 'rgba(139,92,246,.10)'  : 'rgba(99,102,241,.08)'
-  const chevronBg  = isDark ? 'rgba(255,255,255,.07)' : 'rgba(0,0,0,.06)'
-  const chevronFg  = isDark ? 'rgba(255,255,255,.7)'  : 'rgba(15,15,25,.7)'
+  const text      = isDark ? 'rgba(255,255,255,.85)' : 'rgba(15,15,25,.85)'
+  const textMuted = isDark ? 'rgba(255,255,255,.45)' : 'rgba(15,15,25,.45)'
+  const border    = isDark ? 'rgba(255,255,255,.07)' : 'rgba(0,0,0,.09)'
+  const surface   = isDark ? '#0f0f19'               : '#ffffff'
+  const hoverBg   = isDark ? 'rgba(139,92,246,.10)'  : 'rgba(99,102,241,.08)'
+  const chevronBg = isDark ? 'rgba(255,255,255,.07)' : 'rgba(0,0,0,.06)'
+  const chevronFg = isDark ? 'rgba(255,255,255,.7)'  : 'rgba(15,15,25,.7)'
 
   return (
     <div
       style={{
         display: 'flex',
+        flexDirection: 'row',
         height: '100vh',
         overflow: 'hidden',
         background: isDark ? '#07070f' : '#f4f4f8',
       }}
     >
-      {/* ── Desktop Sidebar ── */}
+
+      {/* ══════════════════════════════════════════
+          DESKTOP SIDEBAR
+          Hidden on mobile via .app-shell-sidebar
+          in mobile-responsive.css
+      ══════════════════════════════════════════ */}
       <aside
         className="app-shell-sidebar"
         style={{
@@ -72,7 +78,8 @@ export default function AppShell() {
           zIndex: 10,
         }}
       >
-        {/* Logo row */}
+
+        {/* ── Logo row ── */}
         <div
           style={{
             padding: '0 12px',
@@ -117,6 +124,7 @@ export default function AppShell() {
               ResearchOS
             </span>
           </Link>
+
           <button
             onClick={() => setCollapsed(v => !v)}
             aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
@@ -133,7 +141,7 @@ export default function AppShell() {
           </button>
         </div>
 
-        {/* Navigation */}
+        {/* ── Navigation ── */}
         <nav
           style={{
             flex: 1, display: 'flex', flexDirection: 'column',
@@ -193,8 +201,10 @@ export default function AppShell() {
           ))}
         </nav>
 
-        {/* Footer */}
+        {/* ── Sidebar Footer: theme toggle + user menu ── */}
         <div style={{ padding: '8px', borderTop: `1px solid ${border}`, flexShrink: 0 }}>
+
+          {/* Theme toggle */}
           <button
             onClick={toggleTheme}
             title={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
@@ -214,10 +224,12 @@ export default function AppShell() {
             {!collapsed && <span>{isDark ? 'Light mode' : 'Dark mode'}</span>}
           </button>
 
+          {/* User menu */}
           <div style={{ position: 'relative', marginTop: '4px' }} ref={userMenuRef}>
             <button
               onClick={() => setUserMenuOpen(v => !v)}
-              aria-haspopup="true" aria-expanded={userMenuOpen}
+              aria-haspopup="true"
+              aria-expanded={userMenuOpen}
               style={{
                 width: '100%', minHeight: '52px', borderRadius: '12px',
                 display: 'flex', alignItems: 'center',
@@ -250,11 +262,11 @@ export default function AppShell() {
               )}
             </button>
 
+            {/* Dropdown */}
             {userMenuOpen && (
               <div style={{
                 position: 'absolute', bottom: 'calc(100% + 6px)', left: 0, right: 0,
-                background: surface, border: `1px solid ${border}`,
-                borderRadius: '12px',
+                background: surface, border: `1px solid ${border}`, borderRadius: '12px',
                 boxShadow: isDark ? '0 8px 32px rgba(0,0,0,.5)' : '0 8px 32px rgba(0,0,0,.12)',
                 overflow: 'hidden', zIndex: 100,
                 minWidth: collapsed ? '160px' : 'auto',
@@ -284,46 +296,70 @@ export default function AppShell() {
         </div>
       </aside>
 
-      {/* ── Mobile Top Bar ── */}
+      {/* ══════════════════════════════════════════
+          MAIN CONTENT COLUMN
+          Contains: mobile top bar + page content
+      ══════════════════════════════════════════ */}
       <div
-        className="mobile-top-bar"
-        style={{ display: 'none' }} /* shown via CSS media query */
+        style={{
+          flex: 1,
+          display: 'flex',
+          flexDirection: 'column',   /* ← stacks top bar above main */
+          overflow: 'hidden',
+          minWidth: 0,
+        }}
       >
-        <Link to="/dashboard" className="mobile-top-bar-logo">
-          <div className="mobile-top-bar-logo-mark">R</div>
-          <span className="mobile-top-bar-logo-text">ResearchOS</span>
-        </Link>
-        <div className="mobile-top-bar-actions">
-          <button
-            onClick={toggleTheme}
-            style={{
-              width: '36px', height: '36px', border: 'none',
-              background: 'transparent', color: 'var(--text-muted)',
-              cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
-              borderRadius: '8px',
-            }}
-          >
-            {isDark ? <SunIcon size={18} /> : <MoonIcon size={18} />}
-          </button>
-          <button
-            onClick={handleLogout}
-            style={{
-              width: '36px', height: '36px', border: 'none',
-              background: 'transparent', color: '#f87171',
-              cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
-              borderRadius: '8px',
-            }}
-          >
-            <LogoutIcon size={16} />
-          </button>
-        </div>
-      </div>
 
-      {/* ── Main content ── */}
-      <div
-        style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', minWidth: 0 }}
-      >
-        {/* Mobile top bar is injected here via CSS */}
+        {/* ── Mobile Top Bar ──────────────────────
+            Visible only on mobile (≤768px).
+            CSS in mobile-responsive.css shows it.
+        ─────────────────────────────────────────── */}
+        <div className="mobile-top-bar">
+          <Link to="/dashboard" className="mobile-top-bar-logo">
+            <div className="mobile-top-bar-logo-mark">R</div>
+            <span className="mobile-top-bar-logo-text">ResearchOS</span>
+          </Link>
+
+          <div className="mobile-top-bar-actions">
+            {/* Theme toggle */}
+            <button
+              onClick={toggleTheme}
+              aria-label={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
+              style={{
+                width: '36px', height: '36px',
+                border: '1px solid var(--border)',
+                background: 'var(--bg-card)',
+                color: 'var(--text-muted)',
+                cursor: 'pointer',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                borderRadius: '8px',
+                transition: 'background .15s, color .15s',
+              }}
+            >
+              {isDark ? <SunIcon size={17} /> : <MoonIcon size={17} />}
+            </button>
+
+            {/* Sign out */}
+            <button
+              onClick={handleLogout}
+              aria-label="Sign out"
+              style={{
+                width: '36px', height: '36px',
+                border: '1px solid var(--border)',
+                background: 'var(--bg-card)',
+                color: '#f87171',
+                cursor: 'pointer',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                borderRadius: '8px',
+                transition: 'background .15s',
+              }}
+            >
+              <LogoutIcon size={16} />
+            </button>
+          </div>
+        </div>
+
+        {/* ── Page content ── */}
         <main
           className="app-shell-main"
           style={{
@@ -335,9 +371,14 @@ export default function AppShell() {
         >
           <Outlet />
         </main>
+
       </div>
 
-      {/* ── Mobile Bottom Nav ── */}
+      {/* ══════════════════════════════════════════
+          MOBILE BOTTOM NAV
+          Visible only on mobile (≤768px).
+          CSS in mobile-responsive.css shows it.
+      ══════════════════════════════════════════ */}
       <nav className="mobile-bottom-nav" aria-label="Main navigation">
         {NAV[0].items.map(item => (
           <NavLink
@@ -352,11 +393,14 @@ export default function AppShell() {
           </NavLink>
         ))}
       </nav>
+
     </div>
   )
 }
 
-/* ── Icons ── */
+/* ══════════════════════════════════════════════════════
+   ICONS
+══════════════════════════════════════════════════════ */
 
 function HomeIcon({ size = 20 }) {
   return (
@@ -400,10 +444,10 @@ function SunIcon({ size = 20 }) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
       <circle cx="12" cy="12" r="5"/>
-      <line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/>
-      <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/>
-      <line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/>
-      <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>
+      <line x1="12" y1="1"  x2="12" y2="3" /><line x1="12" y1="21" x2="12" y2="23"/>
+      <line x1="4.22" y1="4.22"   x2="5.64" y2="5.64"  /><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/>
+      <line x1="1"    y1="12"     x2="3"    y2="12"    /><line x1="21"    y1="12"    x2="23"    y2="12"   />
+      <line x1="4.22" y1="19.78"  x2="5.64" y2="18.36" /><line x1="18.36" y1="5.64"  x2="19.78" y2="4.22" />
     </svg>
   )
 }
