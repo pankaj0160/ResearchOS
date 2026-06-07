@@ -8,6 +8,8 @@ export const PIPELINE_STEPS = [
   { key: 'final',  label: 'Final Report',    waiting: 'Waiting', running: 'Finalizing report',   done: 'Report Generated'        },
 ]
 
+
+
 const RAW_LOG_LIMIT    = 1000
 const STREAM_TIMEOUT_MS = 120_000
 
@@ -85,8 +87,10 @@ export function useSSEStream() {
     const agent   = event.agent || 'system'
     const type    = event.type  || 'message'
     const message = event.msg   || ''
-
+    
     pushRawLog(event)
+    if (type === 'ping') return  // keepalive from server, ignore
+
 
     // ── Error event ──────────────────────────────────────────────────────────
     if (type === 'error') {
@@ -234,9 +238,14 @@ export function useSSEStream() {
     setRunId(null)
     setRunStatus('loading')
 
-    const token  = localStorage.getItem('researchos_token')
-    const source = new EventSource(
-      `/api/research/stream?topic=${encodeURIComponent(cleanTopic)}${token ? `&token=${token}` : ''}`
+    const token   = localStorage.getItem('researchos_token')
+    const params  = new URLSearchParams({ topic: cleanTopic })
+    if (token) params.set('token', token)
+
+    const apiBase = import.meta.env.VITE_API_URL || ''
+    const source  = new EventSource(
+      `${apiBase}/api/research/stream?${params.toString()}`,
+      { withCredentials: false }
     )
     eventSourceRef.current = source
 

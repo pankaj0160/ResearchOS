@@ -73,6 +73,39 @@ async def lifespan(app: FastAPI):
     yield
 
 
+
+import asyncio
+async def event_stream():
+    report = ""
+    feedback = ""
+    last_ping = asyncio.get_event_loop().time()
+
+    try:
+        async for event in run_pipeline_async(topic):
+            # Ping if 15s have passed with no event
+            now = asyncio.get_event_loop().time()
+            if now - last_ping > 15:
+                yield f"data: {json.dumps({'type': 'ping'})}\n\n"
+                last_ping = now
+
+            if event.get("agent") == "writer" and event.get("type") in ("chunk", "streaming"):
+                report += event.get("msg", "")
+            if event.get("agent") == "critic" and event.get("type") in ("chunk", "streaming"):
+                feedback += event.get("msg", "")
+
+            yield f"data: {json.dumps(event)}\n\n"
+            last_ping = asyncio.get_event_loop().time()
+
+        if report:
+            run_id = save_run(topic, report, feedback, user_id=user_id)
+            yield f"data: {json.dumps({'type': 'saved', 'run_id': run_id})}\n\n"
+
+        yield f"data: {json.dumps({'type': 'done'})}\n\n"
+
+    except Exception as exc:
+        yield f"data: {json.dumps({'type': 'error', 'msg': str(exc)})}\n\n"
+
+
 # ── App ───────────────────────────────────────────────────────────────────────
 
 app = FastAPI(
@@ -241,7 +274,6 @@ async def delete_run_route(run_id: int, current_user: CurrentUser):
 
 
 # ── Research SSE Stream ───────────────────────────────────────────────────────
-
 @app.get("/api/research/stream")
 async def research_stream(
     topic: str = Query(..., min_length=3, max_length=300),
@@ -252,13 +284,23 @@ async def research_stream(
     async def event_stream():
         report   = ""
         feedback = ""
+        last_ping = asyncio.get_event_loop().time()
+
         try:
             async for event in run_pipeline_async(topic):
+                # Keep Render proxy alive — ping every 15s of silence
+                now = asyncio.get_event_loop().time()
+                if now - last_ping > 15:
+                    yield f"data: {json.dumps({'type': 'ping'})}\n\n"
+                    last_ping = now
+
                 if event.get("agent") == "writer" and event.get("type") in ("chunk", "streaming"):
                     report += event.get("msg", "")
                 if event.get("agent") == "critic" and event.get("type") in ("chunk", "streaming"):
                     feedback += event.get("msg", "")
+
                 yield f"data: {json.dumps(event)}\n\n"
+                last_ping = asyncio.get_event_loop().time()
 
             if report:
                 run_id = save_run(topic, report, feedback, user_id=user_id)
@@ -272,9 +314,13 @@ async def research_stream(
     return StreamingResponse(
         event_stream(),
         media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        headers={
+            "Cache-Control":     "no-cache, no-transform",
+            "X-Accel-Buffering": "no",
+            "Connection":        "keep-alive",
+            "Transfer-Encoding": "chunked",
+        },
     )
-
 
 # ══════════════════════════════════════════════════════════════════════════════
 # RAG
