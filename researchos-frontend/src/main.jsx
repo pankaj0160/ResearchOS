@@ -2,6 +2,9 @@ import React from 'react'
 import ReactDOM from 'react-dom/client'
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import './index.css'
+import './mobile-responsive.css' 
+
+
 
 import { AuthProvider, useAuth }   from './context/AuthContext'
 import { ThemeProvider }           from './context/ThemeProvider'

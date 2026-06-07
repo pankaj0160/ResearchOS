@@ -1,0 +1,614 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   RESEARCHOS — MOBILE & RESPONSIVE OVERRIDES
+   Add this file AFTER your main index.css import
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ── Breakpoints used throughout:
+   xs:  < 480px   (phones portrait)
+   sm:  < 640px   (phones landscape / small phones)
+   md:  < 768px   (tablets portrait)
+   lg:  < 1024px  (tablets landscape)
+   ── */
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   APP SHELL — MOBILE SIDEBAR → BOTTOM NAV
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* Mobile bottom nav bar (hidden on desktop) */
+.mobile-bottom-nav {
+  display: none;
+}
+
+@media (max-width: 768px) {
+  /* Hide the desktop sidebar entirely */
+  .app-shell-sidebar {
+    display: none !important;
+  }
+
+  /* Make main content fill full width */
+  .app-shell-main {
+    padding: 16px 16px 80px !important; /* bottom padding for nav bar */
+  }
+
+  /* Show bottom nav */
+  .mobile-bottom-nav {
+    display: flex;
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    z-index: 100;
+    background: var(--sb-bg, #111110);
+    border-top: 1px solid var(--sb-border, #292524);
+    padding: 0;
+    height: 64px;
+    align-items: stretch;
+    justify-content: space-around;
+  }
+
+  .mobile-bottom-nav-item {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 3px;
+    padding: 8px 4px;
+    background: none;
+    border: none;
+    cursor: pointer;
+    color: var(--sb-text, #a8a29e);
+    font-size: 10px;
+    font-weight: 500;
+    font-family: var(--font-body);
+    text-decoration: none;
+    transition: color 0.15s;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .mobile-bottom-nav-item--active {
+    color: var(--sb-accent, #0d9488);
+  }
+
+  .mobile-bottom-nav-item svg {
+    flex-shrink: 0;
+  }
+
+  .mobile-bottom-nav-label {
+    font-size: 9.5px;
+    letter-spacing: 0.01em;
+  }
+
+  /* Theme toggle & user — show in a top header bar on mobile */
+  .mobile-top-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 16px;
+    height: 52px;
+    background: var(--bg-card);
+    border-bottom: 1px solid var(--border);
+    position: sticky;
+    top: 0;
+    z-index: 50;
+    flex-shrink: 0;
+  }
+
+  .mobile-top-bar-logo {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    text-decoration: none;
+  }
+
+  .mobile-top-bar-logo-mark {
+    width: 28px; height: 28px;
+    border-radius: 7px;
+    background: var(--accent);
+    color: #fff;
+    font-weight: 800;
+    font-size: 14px;
+    display: flex; align-items: center; justify-content: center;
+    font-family: var(--font-display);
+  }
+
+  .mobile-top-bar-logo-text {
+    font-family: var(--font-display);
+    font-weight: 700;
+    font-size: 15px;
+    color: var(--text-primary);
+    letter-spacing: -0.02em;
+  }
+
+  .mobile-top-bar-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+}
+
+/* Hide mobile elements on desktop */
+@media (min-width: 769px) {
+  .mobile-bottom-nav,
+  .mobile-top-bar {
+    display: none !important;
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   AI DASHBOARD PAGE
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+@media (max-width: 768px) {
+  .dash-page {
+    padding: 12px;
+    gap: 1rem;
+  }
+
+  /* Greeting header */
+  .dash-page-header > div:first-child {
+    margin-top: 0 !important;
+    margin-bottom: 0 !important;
+  }
+
+  /* Gradient greeting card */
+  .dash-greeting-card {
+    padding: 1.1rem !important;
+    border-radius: 16px !important;
+  }
+
+  .dash-greeting-inner {
+    flex-direction: column !important;
+    gap: 0.75rem !important;
+    align-items: flex-start !important;
+  }
+
+  .dash-greeting-emoji {
+    font-size: 1.6rem !important;
+  }
+
+  .dash-greeting-text {
+    font-size: 1.2rem !important;
+  }
+
+  .dash-greeting-time {
+    font-size: 1.6rem !important;
+    text-align: left !important;
+  }
+
+  .dash-greeting-date {
+    font-size: 0.85rem !important;
+  }
+
+  /* Page title */
+  .dash-page h1.page-title {
+    font-size: 1.85rem !important;
+    margin-bottom: 0.4rem !important;
+  }
+
+  .dash-page .page-subtitle {
+    font-size: 0.9rem !important;
+    line-height: 1.55 !important;
+  }
+
+  /* Top 3-col grid → single column on mobile */
+  .dash-top-grid {
+    grid-template-columns: 1fr !important;
+    gap: 0.75rem !important;
+  }
+
+  /* Cards */
+  .dash-card {
+    padding: 0.85rem;
+  }
+
+  /* Weather forecast scroll */
+  .weather-forecast {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    padding-bottom: 4px;
+  }
+
+  /* Chat panel */
+  .dash-chat-panel {
+    min-height: 300px;
+    max-height: 420px;
+  }
+
+  .dash-chat-messages {
+    padding: 0.75rem;
+  }
+}
+
+@media (max-width: 480px) {
+  .dash-page {
+    padding: 10px;
+  }
+
+  .dash-page h1.page-title {
+    font-size: 1.5rem !important;
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   NEWS PAGE
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+@media (max-width: 900px) {
+  .news-results-layout {
+    grid-template-columns: 1fr !important;
+  }
+}
+
+@media (max-width: 768px) {
+  .news-page {
+    padding: 12px;
+    gap: 0.9rem;
+  }
+
+  .news-page-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.5rem;
+  }
+
+  .news-page h1.page-title {
+    font-size: 1.35rem;
+  }
+
+  /* Search bar */
+  .news-search-bar {
+    padding: 0.8rem;
+    gap: 0.65rem;
+  }
+
+  .news-input-row {
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+
+  .news-search-btn {
+    width: 100%;
+    justify-content: center;
+    padding: 0.65rem 1rem;
+  }
+
+  /* Category pills — horizontal scroll */
+  .news-filters-row {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.6rem;
+  }
+
+  .news-category-pills {
+    overflow-x: auto;
+    flex-wrap: nowrap;
+    -webkit-overflow-scrolling: touch;
+    padding-bottom: 4px;
+    /* hide scrollbar */
+    scrollbar-width: none;
+  }
+  .news-category-pills::-webkit-scrollbar { display: none; }
+
+  .news-cat-pill {
+    flex-shrink: 0;
+  }
+
+  .news-days-group {
+    width: 100%;
+  }
+
+  .news-days-pills {
+    flex-wrap: wrap;
+  }
+
+  /* Quick topics — horizontal scroll */
+  .news-quick-topics {
+    overflow-x: auto;
+    flex-wrap: nowrap;
+    -webkit-overflow-scrolling: touch;
+    padding-bottom: 4px;
+    scrollbar-width: none;
+  }
+  .news-quick-topics::-webkit-scrollbar { display: none; }
+
+  .news-quick-chip {
+    flex-shrink: 0;
+  }
+
+  /* Results */
+  .news-results-layout {
+    grid-template-columns: 1fr !important;
+    gap: 0.75rem;
+  }
+
+  /* Article list max height */
+  .news-articles-list {
+    max-height: none !important;
+  }
+
+  /* Stats bar — scrollable */
+  .news-stats-bar {
+    overflow-x: auto;
+    flex-wrap: nowrap;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+  .news-stats-bar::-webkit-scrollbar { display: none; }
+
+  .news-stats-sources {
+    flex-wrap: nowrap;
+    margin-left: 0;
+  }
+}
+
+@media (max-width: 480px) {
+  .news-page {
+    padding: 10px;
+  }
+
+  .news-page h1.page-title {
+    font-size: 1.2rem;
+  }
+
+  .news-empty-state {
+    padding: 2rem 1rem;
+  }
+
+  .news-empty-title {
+    font-size: 1.1rem !important;
+  }
+
+  .news-empty-features {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .article-card {
+    padding: 0.7rem 0.75rem;
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   PDF CHAT PAGE
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+@media (max-width: 768px) {
+  .rag-page {
+    padding: 12px 12px 0;
+  }
+
+  .rag-page-header {
+    margin-bottom: 0.9rem;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.5rem;
+  }
+
+  .rag-page h1.page-title {
+    font-size: 1.35rem;
+  }
+
+  /* Stack layout vertically */
+  .rag-layout {
+    grid-template-columns: 1fr !important;
+    gap: 0.75rem;
+    overflow: visible;
+  }
+
+  /* Sidebar becomes a collapsible top strip */
+  .rag-sidebar-col {
+    overflow: visible;
+  }
+
+  .rag-sidebar {
+    gap: 0.75rem;
+  }
+
+  /* Active doc card compact */
+  .rag-active-doc {
+    padding: 0.75rem;
+  }
+
+  .rag-doc-stats {
+    overflow-x: auto;
+    flex-wrap: nowrap;
+    scrollbar-width: none;
+  }
+  .rag-doc-stats::-webkit-scrollbar { display: none; }
+
+  /* Sessions list — horizontal scroll on mobile */
+  .rag-sessions-list {
+    max-height: 180px;
+    overflow-y: auto;
+  }
+
+  /* Suggested questions — hide on mobile to save space (show inline in chat) */
+  .rag-suggested {
+    display: none;
+  }
+
+  /* Chat panel — make it tall enough to use */
+  .rag-chat-col {
+    border-radius: var(--radius-lg) !important;
+    min-height: 420px;
+  }
+
+  .rag-messages {
+    padding: 0.85rem;
+    gap: 0.75rem;
+  }
+
+  /* Bubbles full width on mobile */
+  .chat-bubble {
+    max-width: 90% !important;
+  }
+
+  /* Input area */
+  .chat-input-area {
+    padding: 0.65rem 0.75rem 0.75rem;
+  }
+
+  /* Chat suggestions — horizontal scroll */
+  .chat-suggestions {
+    overflow-x: auto;
+    flex-wrap: nowrap;
+    -webkit-overflow-scrolling: touch;
+    padding-bottom: 4px;
+    scrollbar-width: none;
+  }
+  .chat-suggestions::-webkit-scrollbar { display: none; }
+
+  .chat-suggestion-chip {
+    flex-shrink: 0;
+  }
+
+  /* Drop zone compact */
+  .rag-drop-target {
+    padding: 1.25rem 0.75rem;
+  }
+}
+
+@media (max-width: 480px) {
+  .rag-page {
+    padding: 10px 10px 0;
+  }
+
+  .chat-bubble {
+    max-width: 95% !important;
+    padding: 0.6rem 0.8rem !important;
+    font-size: 13px !important;
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   RESEARCH PAGE
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+@media (max-width: 768px) {
+  /* Main container padding */
+  .research-main-container {
+    padding-left: 12px !important;
+    padding-right: 12px !important;
+    padding-top: 12px !important;
+    gap: 1rem !important;
+  }
+
+  /* Header */
+  .research-header-row {
+    flex-direction: column !important;
+    align-items: flex-start !important;
+    gap: 0.75rem !important;
+  }
+
+  .research-title {
+    font-size: 1.4rem !important;
+  }
+
+  /* Metrics grid 3-col → single row scrollable or 1-col */
+  .research-metrics-grid {
+    grid-template-columns: 1fr !important;
+    gap: 0.6rem !important;
+  }
+
+  /* Pipeline flow — horizontal scroll */
+  .pipeline-flow-container {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    padding-bottom: 8px;
+  }
+
+  /* Report + Log stacks vertically */
+  .research-bottom-grid {
+    grid-template-columns: 1fr !important;
+  }
+
+  /* Execution log — limit height */
+  .execution-log-panel {
+    max-height: 300px;
+  }
+}
+
+@media (max-width: 480px) {
+  .research-title {
+    font-size: 1.2rem !important;
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   PAGE CONTAINER — GLOBAL MOBILE PADDING
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+@media (max-width: 768px) {
+  .page-container {
+    padding: 1rem !important;
+  }
+
+  .page-title {
+    font-size: 1.35rem !important;
+  }
+
+  .page-subtitle {
+    font-size: 13px !important;
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   UTILITY — TOUCH TARGETS & MOBILE UX
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+@media (max-width: 768px) {
+  /* Ensure all interactive elements meet 44px minimum touch target */
+  button:not(.news-cat-pill):not(.news-days-pill):not(.news-quick-chip):not(.headlines-topic-chip):not(.source-chip):not(.chat-suggestion-chip):not(.dash-chat-suggestion) {
+    min-height: 40px;
+  }
+
+  /* Pill buttons — slightly larger on mobile */
+  .news-cat-pill,
+  .news-days-pill,
+  .headlines-topic-chip {
+    padding: 5px 12px !important;
+    font-size: 12.5px !important;
+  }
+
+  /* Inputs — prevent iOS zoom (font-size must be >= 16px) */
+  input[type="text"],
+  input[type="email"],
+  input[type="password"],
+  input[type="search"],
+  textarea {
+    font-size: 16px !important;
+  }
+
+  /* Override for elements where 16px looks too big */
+  .chat-textarea,
+  .dash-chat-textarea {
+    font-size: 15px !important;
+  }
+
+  /* Prevent horizontal scroll on the whole page */
+  body {
+    overflow-x: hidden;
+  }
+
+  /* Smooth scrolling on mobile */
+  * {
+    -webkit-overflow-scrolling: touch;
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   NAVBAR (the Navbar component passed in the snippet)
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+@media (max-width: 640px) {
+  /* Navbar title — hide subtitle on very small screens */
+  .navbar-subtitle {
+    display: none;
+  }
+
+  /* Navbar height compact */
+  .navbar-header {
+    height: 52px !important;
+  }
+}

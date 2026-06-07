@@ -19,11 +19,10 @@ export default function AppShell() {
   const { user, logout }        = useAuth()
   const { isDark, toggleTheme } = useTheme()
   const navigate                = useNavigate()
-  const [collapsed, setCollapsed]     = useState(false)
+  const [collapsed, setCollapsed]       = useState(false)
   const [userMenuOpen, setUserMenuOpen] = useState(false)
   const userMenuRef = useRef(null)
 
-  // Close user menu when clicking outside
   useEffect(() => {
     function handleClickOutside(e) {
       if (userMenuRef.current && !userMenuRef.current.contains(e.target)) {
@@ -39,7 +38,6 @@ export default function AppShell() {
     navigate('/', { replace: true })
   }
 
-  // Derived color tokens — correct for both themes
   const text       = isDark ? 'rgba(255,255,255,.85)' : 'rgba(15,15,25,.85)'
   const textMuted  = isDark ? 'rgba(255,255,255,.45)' : 'rgba(15,15,25,.45)'
   const border     = isDark ? 'rgba(255,255,255,.07)' : 'rgba(0,0,0,.09)'
@@ -57,8 +55,9 @@ export default function AppShell() {
         background: isDark ? '#07070f' : '#f4f4f8',
       }}
     >
-      {/* ── Sidebar ── */}
+      {/* ── Desktop Sidebar ── */}
       <aside
+        className="app-shell-sidebar"
         style={{
           width: collapsed ? '72px' : '256px',
           minWidth: collapsed ? '72px' : '256px',
@@ -73,7 +72,7 @@ export default function AppShell() {
           zIndex: 10,
         }}
       >
-        {/* ── Logo row ── */}
+        {/* Logo row */}
         <div
           style={{
             padding: '0 12px',
@@ -89,49 +88,26 @@ export default function AppShell() {
           <Link
             to="/dashboard"
             style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '10px',
-              textDecoration: 'none',
-              overflow: 'hidden',
-              minWidth: 0,
+              display: 'flex', alignItems: 'center', gap: '10px',
+              textDecoration: 'none', overflow: 'hidden', minWidth: 0,
             }}
           >
-            {/* Logo mark */}
             <div
               style={{
-                width: '36px',
-                height: '36px',
-                borderRadius: '10px',
+                width: '36px', height: '36px', borderRadius: '10px',
                 background: 'linear-gradient(135deg,#6366f1 0%,#8b5cf6 55%,#ec4899 100%)',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                boxShadow: '0 0 18px rgba(139,92,246,.35)',
-                flexShrink: 0,
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                boxShadow: '0 0 18px rgba(139,92,246,.35)', flexShrink: 0,
               }}
             >
               <span style={{ color: '#fff', fontWeight: 900, fontSize: '1.1rem' }}>R</span>
             </div>
-
-            {/* Logo text — hidden when collapsed */}
             <span
               style={{
-                fontSize: '1.55rem',
-                fontWeight: 900,
-                letterSpacing: '-0.04em',
-
+                fontSize: '1.55rem', fontWeight: 900, letterSpacing: '-0.04em',
                 ...(isDark
-                  ? {
-                      background:
-                        'linear-gradient(135deg,#ffffff,#d8b4fe)',
-                      WebkitBackgroundClip: 'text',
-                      WebkitTextFillColor: 'transparent',
-                    }
-                  : {
-                      color: '#111827',
-                    }),
-
+                  ? { background: 'linear-gradient(135deg,#ffffff,#d8b4fe)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }
+                  : { color: '#111827' }),
                 whiteSpace: 'nowrap',
                 opacity: collapsed ? 0 : 1,
                 width: collapsed ? 0 : 'auto',
@@ -140,127 +116,69 @@ export default function AppShell() {
             >
               ResearchOS
             </span>
-            
           </Link>
-
-          {/* Collapse toggle */}
           <button
             onClick={() => setCollapsed(v => !v)}
             aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
             style={{
-              width: '32px',
-              height: '32px',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              border: 'none',
-              borderRadius: '8px',
-              cursor: 'pointer',
-              flexShrink: 0,
-              background: chevronBg,
-              color: chevronFg,
+              width: '32px', height: '32px', display: 'flex', alignItems: 'center',
+              justifyContent: 'center', border: 'none', borderRadius: '8px',
+              cursor: 'pointer', flexShrink: 0, background: chevronBg, color: chevronFg,
               transition: 'background .15s, color .15s',
             }}
-            onMouseEnter={e => {
-              e.currentTarget.style.background = 'rgba(139,92,246,.15)'
-              e.currentTarget.style.color = '#8b5cf6'
-            }}
-            onMouseLeave={e => {
-              e.currentTarget.style.background = chevronBg
-              e.currentTarget.style.color = chevronFg
-            }}
+            onMouseEnter={e => { e.currentTarget.style.background = 'rgba(139,92,246,.15)'; e.currentTarget.style.color = '#8b5cf6' }}
+            onMouseLeave={e => { e.currentTarget.style.background = chevronBg; e.currentTarget.style.color = chevronFg }}
           >
             <ChevronIcon flipped={collapsed} />
           </button>
         </div>
 
-        {/* ── Navigation ── */}
+        {/* Navigation */}
         <nav
           style={{
-            flex: 1,
-            display: 'flex',
-            flexDirection: 'column',
-            padding: '16px 8px',
-            overflowY: 'auto',
-            overflowX: 'hidden',
+            flex: 1, display: 'flex', flexDirection: 'column',
+            padding: '16px 8px', overflowY: 'auto', overflowX: 'hidden',
           }}
         >
           {NAV.map(group => (
             <div key={group.section}>
-              {/* Section label */}
               {!collapsed && (
-                <div
-                  style={{
-                    padding: '0 12px',
-                    marginBottom: '6px',
-                    fontSize: '.69rem',
-                    textTransform: 'uppercase',
-                    letterSpacing: '.12em',
-                    fontWeight: 700,
-                    color: textMuted,
-                    whiteSpace: 'nowrap',
-                  }}
-                >
+                <div style={{
+                  padding: '0 12px', marginBottom: '6px', fontSize: '.69rem',
+                  textTransform: 'uppercase', letterSpacing: '.12em', fontWeight: 700,
+                  color: textMuted, whiteSpace: 'nowrap',
+                }}>
                   {group.section}
                 </div>
               )}
-
               {group.items.map(item => (
                 <NavLink
                   key={item.to}
                   to={item.to}
                   title={collapsed ? item.label : undefined}
-                  className={({ isActive }) =>
-                    `sidebar-nav-item${isActive ? ' sidebar-nav-item--active' : ''}`
-                  }
+                  className={({ isActive }) => `sidebar-nav-item${isActive ? ' sidebar-nav-item--active' : ''}`}
                   style={({ isActive }) => ({
-                    display: 'flex',
-                    alignItems: 'center',
-
-                    gap: '18px',              // increased icon-text spacing
-
-                    minHeight: '62px',        // larger row height
-
-                    padding: collapsed
-                      ? '0'
-                      : '0 18px',             // more horizontal padding
-
-                    justifyContent: collapsed
-                      ? 'center'
-                      : 'flex-start',
-
-                    marginBottom: '8px',      // more spacing between items
-
-                    borderRadius: '18px',
-
+                    display: 'flex', alignItems: 'center',
+                    gap: '18px', minHeight: '62px',
+                    padding: collapsed ? '0' : '0 18px',
+                    justifyContent: collapsed ? 'center' : 'flex-start',
+                    marginBottom: '8px', borderRadius: '18px',
                     textDecoration: 'none',
-
                     color: isActive ? '#fff' : text,
-
                     background: isActive
-                      ? 'linear-gradient(135deg, rgba(9, 123, 26, 0.75), rgba(139,92,246,.65))'
+                      ? 'linear-gradient(135deg, rgba(9,123,26,0.75), rgba(139,92,246,.65))'
                       : 'transparent',
-
-                    border: isActive
-                      ? '1px solid rgba(139,92,246,.35)'
-                      : '1px solid transparent',
-
-                    boxShadow: isActive
-                      ? '0 10px 30px rgba(99,102,241,.25)'
-                      : 'none',
-
+                    border: isActive ? '1px solid rgba(139,92,246,.35)' : '1px solid transparent',
+                    boxShadow: isActive ? '0 10px 30px rgba(99,102,241,.25)' : 'none',
                     transition: 'all .22s ease',
                   })}
                   onMouseEnter={e => {
-                    // Only apply hover if not active (active has its own style)
-                    if (!e.currentTarget.classList.contains('sidebar-nav-item--active')) {
+                    if (!e.currentTarget.classList.contains('sidebar-nav-item--active'))
                       e.currentTarget.style.background = hoverBg
-                    }
                   }}
                   onMouseLeave={e => {
-                    if (!e.currentTarget.classList.contains('sidebar-nav-item--active')) {
+                    if (!e.currentTarget.classList.contains('sidebar-nav-item--active'))
                       e.currentTarget.style.background = 'transparent'
-                    }
                   }}
                 >
                   <item.icon size={18} />
@@ -275,33 +193,18 @@ export default function AppShell() {
           ))}
         </nav>
 
-        {/* ── Footer ── */}
-        <div
-          style={{
-            padding: '8px',
-            borderTop: `1px solid ${border}`,
-            flexShrink: 0,
-          }}
-        >
-          {/* Theme toggle */}
+        {/* Footer */}
+        <div style={{ padding: '8px', borderTop: `1px solid ${border}`, flexShrink: 0 }}>
           <button
             onClick={toggleTheme}
             title={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
             style={{
-              width: '100%',
-              minHeight: '40px',
-              borderRadius: '10px',
-              display: 'flex',
-              alignItems: 'center',
+              width: '100%', minHeight: '40px', borderRadius: '10px',
+              display: 'flex', alignItems: 'center',
               justifyContent: collapsed ? 'center' : 'flex-start',
-              gap: '10px',
-              padding: collapsed ? '0' : '0 12px',
-              border: 'none',
-              background: 'transparent',
-              color: text,
-              cursor: 'pointer',
-              fontSize: '.9rem',
-              fontWeight: 500,
+              gap: '10px', padding: collapsed ? '0' : '0 12px',
+              border: 'none', background: 'transparent', color: text,
+              cursor: 'pointer', fontSize: '.9rem', fontWeight: 500,
               transition: 'background .15s',
             }}
             onMouseEnter={e => { e.currentTarget.style.background = hoverBg }}
@@ -311,124 +214,62 @@ export default function AppShell() {
             {!collapsed && <span>{isDark ? 'Light mode' : 'Dark mode'}</span>}
           </button>
 
-          {/* User menu trigger */}
           <div style={{ position: 'relative', marginTop: '4px' }} ref={userMenuRef}>
             <button
               onClick={() => setUserMenuOpen(v => !v)}
-              aria-haspopup="true"
-              aria-expanded={userMenuOpen}
+              aria-haspopup="true" aria-expanded={userMenuOpen}
               style={{
-                width: '100%',
-                minHeight: '52px',
-                borderRadius: '12px',
-                display: 'flex',
-                alignItems: 'center',
+                width: '100%', minHeight: '52px', borderRadius: '12px',
+                display: 'flex', alignItems: 'center',
                 justifyContent: collapsed ? 'center' : 'flex-start',
-                gap: '10px',
-                padding: collapsed ? '0' : '0 10px',
+                gap: '10px', padding: collapsed ? '0' : '0 10px',
                 border: `1px solid ${userMenuOpen ? 'rgba(139,92,246,.4)' : 'transparent'}`,
                 background: userMenuOpen ? hoverBg : 'transparent',
-                cursor: 'pointer',
-                transition: 'background .15s, border-color .15s',
+                cursor: 'pointer', transition: 'background .15s, border-color .15s',
               }}
               onMouseEnter={e => { e.currentTarget.style.background = hoverBg }}
-              onMouseLeave={e => {
-                if (!userMenuOpen) e.currentTarget.style.background = 'transparent'
-              }}
+              onMouseLeave={e => { if (!userMenuOpen) e.currentTarget.style.background = 'transparent' }}
             >
-              {/* Avatar */}
-              <div
-                style={{
-                  width: '34px',
-                  height: '34px',
-                  borderRadius: '9px',
-                  background: 'linear-gradient(135deg,#06b6d4,#14b8a6)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  color: '#fff',
-                  fontWeight: 700,
-                  fontSize: '1rem',
-                  flexShrink: 0,
-                }}
-              >
+              <div style={{
+                width: '34px', height: '34px', borderRadius: '9px',
+                background: 'linear-gradient(135deg,#06b6d4,#14b8a6)',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                color: '#fff', fontWeight: 700, fontSize: '1rem', flexShrink: 0,
+              }}>
                 {user?.username?.[0]?.toUpperCase() ?? 'U'}
               </div>
-
               {!collapsed && (
                 <div style={{ overflow: 'hidden', textAlign: 'left', minWidth: 0 }}>
-                  <div
-                    style={{
-                      color: text,
-                      fontWeight: 600,
-                      fontSize: '.9rem',
-                      whiteSpace: 'nowrap',
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                    }}
-                  >
+                  <div style={{ color: text, fontWeight: 600, fontSize: '.9rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                     {user?.username ?? 'User'}
                   </div>
-                  <div
-                    style={{
-                      color: textMuted,
-                      fontSize: '.78rem',
-                      whiteSpace: 'nowrap',
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                    }}
-                  >
+                  <div style={{ color: textMuted, fontSize: '.78rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                     {user?.email ?? ''}
                   </div>
                 </div>
               )}
             </button>
 
-            {/* User dropdown menu */}
             {userMenuOpen && (
-              <div
-                style={{
-                  position: 'absolute',
-                  bottom: 'calc(100% + 6px)',
-                  left: 0,
-                  right: 0,
-                  background: surface,
-                  border: `1px solid ${border}`,
-                  borderRadius: '12px',
-                  boxShadow: isDark
-                    ? '0 8px 32px rgba(0,0,0,.5)'
-                    : '0 8px 32px rgba(0,0,0,.12)',
-                  overflow: 'hidden',
-                  zIndex: 100,
-                  minWidth: collapsed ? '160px' : 'auto',
-                  ...(collapsed ? { left: '100%', bottom: 0, marginLeft: '8px', right: 'auto', width: '160px' } : {}),
-                }}
-              >
-                <div
-                  style={{
-                    padding: '4px',
-                  }}
-                >
-
+              <div style={{
+                position: 'absolute', bottom: 'calc(100% + 6px)', left: 0, right: 0,
+                background: surface, border: `1px solid ${border}`,
+                borderRadius: '12px',
+                boxShadow: isDark ? '0 8px 32px rgba(0,0,0,.5)' : '0 8px 32px rgba(0,0,0,.12)',
+                overflow: 'hidden', zIndex: 100,
+                minWidth: collapsed ? '160px' : 'auto',
+                ...(collapsed ? { left: '100%', bottom: 0, marginLeft: '8px', right: 'auto', width: '160px' } : {}),
+              }}>
+                <div style={{ padding: '4px' }}>
                   <div style={{ height: '1px', background: border, margin: '2px 0' }} />
-
                   <button
                     onClick={handleLogout}
                     style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '10px',
-                      padding: '10px 12px',
-                      borderRadius: '8px',
-                      color: '#f87171',
-                      fontSize: '.9rem',
-                      fontWeight: 500,
-                      background: 'transparent',
-                      border: 'none',
-                      cursor: 'pointer',
-                      width: '100%',
-                      textAlign: 'left',
-                      transition: 'background .12s',
+                      display: 'flex', alignItems: 'center', gap: '10px',
+                      padding: '10px 12px', borderRadius: '8px',
+                      color: '#f87171', fontSize: '.9rem', fontWeight: 500,
+                      background: 'transparent', border: 'none', cursor: 'pointer',
+                      width: '100%', textAlign: 'left', transition: 'background .12s',
                     }}
                     onMouseEnter={e => { e.currentTarget.style.background = 'rgba(248,113,113,.1)' }}
                     onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}
@@ -443,22 +284,79 @@ export default function AppShell() {
         </div>
       </aside>
 
-      {/* ── Main content ── */}
-      <main
-        style={{
-          flex: 1,
-          overflowY: 'auto',
-          padding: '32px 40px',
-          minWidth: 0,
-        }}
+      {/* ── Mobile Top Bar ── */}
+      <div
+        className="mobile-top-bar"
+        style={{ display: 'none' }} /* shown via CSS media query */
       >
-        <Outlet />
-      </main>
+        <Link to="/dashboard" className="mobile-top-bar-logo">
+          <div className="mobile-top-bar-logo-mark">R</div>
+          <span className="mobile-top-bar-logo-text">ResearchOS</span>
+        </Link>
+        <div className="mobile-top-bar-actions">
+          <button
+            onClick={toggleTheme}
+            style={{
+              width: '36px', height: '36px', border: 'none',
+              background: 'transparent', color: 'var(--text-muted)',
+              cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
+              borderRadius: '8px',
+            }}
+          >
+            {isDark ? <SunIcon size={18} /> : <MoonIcon size={18} />}
+          </button>
+          <button
+            onClick={handleLogout}
+            style={{
+              width: '36px', height: '36px', border: 'none',
+              background: 'transparent', color: '#f87171',
+              cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
+              borderRadius: '8px',
+            }}
+          >
+            <LogoutIcon size={16} />
+          </button>
+        </div>
+      </div>
+
+      {/* ── Main content ── */}
+      <div
+        style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', minWidth: 0 }}
+      >
+        {/* Mobile top bar is injected here via CSS */}
+        <main
+          className="app-shell-main"
+          style={{
+            flex: 1,
+            overflowY: 'auto',
+            padding: '32px 40px',
+            minWidth: 0,
+          }}
+        >
+          <Outlet />
+        </main>
+      </div>
+
+      {/* ── Mobile Bottom Nav ── */}
+      <nav className="mobile-bottom-nav" aria-label="Main navigation">
+        {NAV[0].items.map(item => (
+          <NavLink
+            key={item.to}
+            to={item.to}
+            className={({ isActive }) =>
+              `mobile-bottom-nav-item${isActive ? ' mobile-bottom-nav-item--active' : ''}`
+            }
+          >
+            <item.icon size={22} />
+            <span className="mobile-bottom-nav-label">{item.label}</span>
+          </NavLink>
+        ))}
+      </nav>
     </div>
   )
 }
 
-/* ── Icons ─────────────────────────────────────────────────────────────── */
+/* ── Icons ── */
 
 function HomeIcon({ size = 20 }) {
   return (
@@ -485,7 +383,6 @@ function FileIcon({ size = 20 }) {
       <polyline points="14 2 14 8 20 8"/>
       <line x1="16" y1="13" x2="8" y2="13"/>
       <line x1="16" y1="17" x2="8" y2="17"/>
-      <polyline points="10 9 9 9 8 9"/>
     </svg>
   )
 }
@@ -495,15 +392,6 @@ function NewsIcon({ size = 20 }) {
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
       <path d="M4 22h16a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2H8a2 2 0 0 0-2 2v16a2 2 0 0 1-2 2Zm0 0a2 2 0 0 1-2-2v-9c0-1.1.9-2 2-2h2"/>
       <path d="M18 14h-8"/><path d="M15 18h-5"/><path d="M10 6h8v4h-8V6Z"/>
-    </svg>
-  )
-}
-
-function SettingsIcon({ size = 20 }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-      <circle cx="12" cy="12" r="3"/>
-      <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
     </svg>
   )
 }
