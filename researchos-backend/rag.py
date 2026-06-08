@@ -1,26 +1,11 @@
 """
-rag.py — Zero-RAM RAG for Render free tier.
+rag.py — Zero-RAM RAG using google-generativeai SDK.
 
-WHY LOCAL MODELS ALWAYS OOM ON RENDER FREE:
-  Render free = 512MB RAM hard limit
-  all-MiniLM-L6-v2  = 90MB model weights
-  + PyTorch runtime  = 200MB
-  + FastAPI baseline = 100MB
-  + ChromaDB         = 50MB
-  + PDF processing   = 30MB
-  = 470MB before a single request → OOM on any traffic spike
+Root cause of all 404 errors:
+  Hardcoding model names + REST calls = breaks when Google changes availability.
+  Fix: use google-generativeai SDK which auto-resolves the correct endpoint.
 
-THE ONLY REAL FIX:
-  Use API-based embeddings → 0MB RAM for model weights
-  Google Gemini embeddings → free tier (1500 req/day), no local model
-
-MEMORY BUDGET WITH THIS FILE:
-  Google API call    =  0MB  (HTTP request only)
-  ChromaDB on disk   = 30MB
-  PDF page-by-page   =  5MB
-  FastAPI baseline   = 100MB
-  ─────────────────────────
-  Total              = ~135MB  ✓ fits easily in 512MB
+pip install google-generativeai
 """
 
 from __future__ import annotations
@@ -38,12 +23,10 @@ from langchain_core.embeddings import Embeddings
 
 from agents import get_chain_llm
 
-
 # ── Environment ───────────────────────────────────────────────────────────────
 
-LOW_MEMORY_MODE  = os.getenv("RENDER_LOW_MEMORY", "false").lower() == "true"
-GOOGLE_API_KEY   = os.getenv("GOOGLE_API_KEY", "")
-OPENAI_API_KEY   = os.getenv("OPENAI_API_KEY", "")
+LOW_MEMORY_MODE = os.getenv("RENDER_LOW_MEMORY", "false").lower() == "true"
+GOOGLE_API_KEY  = os.getenv("GOOGLE_API_KEY", "")
 
 # ── Config ────────────────────────────────────────────────────────────────────
 
@@ -57,8 +40,6 @@ MAX_HISTORY       = 3
 
 CHROMA_DIR.mkdir(exist_ok=True)
 
-# ── System prompt ─────────────────────────────────────────────────────────────
-
 _SYSTEM_PROMPT = """You are a precise document assistant.
 Answer ONLY from the document chunks provided. Never use outside knowledge.
 
@@ -71,141 +52,118 @@ RULES:
 FORMAT: Paragraph with [Chunk N] citations. End with: Sources: Chunk N (section: X)
 """
 
-
 # ══════════════════════════════════════════════════════════════════════════════
-# EMBEDDING PROVIDERS — zero local RAM, pure API calls
-# Priority: Google Gemini (free) → OpenAI → TF-IDF fallback (truly zero dep)
+# EMBEDDING — uses official SDK, no manual URL/model guessing
 # ══════════════════════════════════════════════════════════════════════════════
 
 class GeminiEmbeddings(Embeddings):
     """
-    Google Gemini embeddings via REST API.
-    Uses embedContent (single) endpoint — works on all free tier keys.
-    Free tier: 1500 requests/day, 100 requests/minute.
-    Get key: https://aistudio.google.com/app/apikey (no credit card)
+    Uses google-generativeai SDK — no hardcoded URLs, no model guessing.
+    SDK auto-picks the correct endpoint for your key type.
+
+    Install: pip install google-generativeai
+    Key:     https://aistudio.google.com/app/apikey
     """
 
+    # Models to try in order — SDK resolves the correct endpoint for each
+    _MODELS = [
+        "models/gemini-embedding-001",
+        "models/gemini-embedding-2",
+        "models/gemini-embedding-2-preview",
+    ]
+
     def __init__(self, api_key: str):
-        self.api_key = api_key
-        # v1 (not v1beta) + gemini-embedding-exp-03-07 is the correct
-        # free-tier model. text-embedding-004 requires v1beta enterprise.
-        self.base_url = "https://generativelanguage.googleapis.com/v1beta/models"
-        self.model    = "gemini-embedding-exp-03-07"
+        self.api_key     = api_key
+        self._model_name = None   # resolved on first call
+        self._client     = None
+
+    def _get_client(self):
+        if self._client is None:
+            try:
+                import google.generativeai as genai
+            except ImportError:
+                raise RuntimeError(
+                    "google-generativeai not installed. "
+                    "Run: pip install google-generativeai"
+                )
+            genai.configure(api_key=self.api_key)
+            self._client = genai
+        return self._client
+
+    def _resolve_model(self) -> str:
+        """Find first model supported by this API key."""
+        if self._model_name:
+            return self._model_name
+
+        genai = self._get_client()
+
+        # Ask the API which models support embedContent
+        try:
+            available = [
+                m.name for m in genai.list_models()
+                if "embedContent" in m.supported_generation_methods
+            ]
+            print(f"[RAG] Available embedding models: {available}")
+        except Exception as e:
+            print(f"[RAG] Could not list models ({e}), trying defaults.")
+            available = self._MODELS
+
+        # Pick first match from our preference list
+        for preferred in self._MODELS:
+            if preferred in available:
+                self._model_name = preferred
+                print(f"[RAG] Using embedding model: {preferred}")
+                return self._model_name
+
+        # Use whatever is available
+        if available:
+            self._model_name = available[0]
+            print(f"[RAG] Using first available model: {self._model_name}")
+            return self._model_name
+
+        raise RuntimeError(
+            "No embedding models available for your Google API key. "
+            "Check that the Generative Language API is enabled at "
+            "console.cloud.google.com/apis/library/generativelanguage.googleapis.com"
+        )
 
     def _embed_one(self, text: str) -> list[float]:
-        import urllib.request as _req, json as _json, urllib.error as _err
-
-        # Try primary model, fall back to embedding-001 if not found
-        models_to_try = [
-            ("https://generativelanguage.googleapis.com/v1beta/models", "gemini-embedding-exp-03-07"),
-            ("https://generativelanguage.googleapis.com/v1beta/models", "text-embedding-004"),
-            ("https://generativelanguage.googleapis.com/v1/models",     "text-embedding-004"),
-            ("https://generativelanguage.googleapis.com/v1beta/models", "embedding-001"),
-            ("https://generativelanguage.googleapis.com/v1/models",     "embedding-001"),
-        ]
-
-        last_error = None
-        for base, model in models_to_try:
-            url     = f"{base}/{model}:embedContent?key={self.api_key}"
-            payload = _json.dumps({
-                "model":   f"models/{model}",
-                "content": {"parts": [{"text": text[:8000]}]},
-            }).encode()
-            request = _req.Request(
-                url,
-                data    = payload,
-                headers = {"Content-Type": "application/json"},
-                method  = "POST",
-            )
-            try:
-                with _req.urlopen(request, timeout=30) as resp:
-                    result = _json.loads(resp.read())
-                # Cache the working combo so we stop trying others
-                self.base_url = base
-                self.model    = model
-                return result["embedding"]["values"]
-            except _err.HTTPError as e:
-                body = e.read().decode("utf-8", errors="ignore")
-                last_error = f"{e.code}: {body[:200]}"
-                if e.code == 429:
-                    # Rate limit — stop and raise immediately
-                    raise RuntimeError(f"Gemini rate limit hit. Wait 1 min and retry.") from e
-                continue  # 404 = try next model
-            except Exception as e:
-                last_error = str(e)
-                continue
-
-        raise RuntimeError(f"All Gemini embedding models failed. Last error: {last_error}")
+        genai  = self._get_client()
+        model  = self._resolve_model()
+        result = genai.embed_content(
+            model   = model,
+            content = text[:8000],
+        )
+        return result["embedding"]
 
     def embed_documents(self, texts: list[str]) -> list[list[float]]:
         embeddings = []
         for i, text in enumerate(texts):
             embeddings.append(self._embed_one(text))
-            # Stay under 100 req/min free tier limit
-            if i > 0 and i % 90 == 0:
+            # Free tier: 100 requests/min — pace at ~80/min to be safe
+            if i > 0 and i % 80 == 0:
+                print(f"[RAG] Rate limit pause at chunk {i}...")
                 time.sleep(62)
             elif i > 0 and i % 10 == 0:
-                time.sleep(1)
+                time.sleep(0.8)
         return embeddings
 
     def embed_query(self, text: str) -> list[float]:
         return self._embed_one(text)
 
 
-class OpenAIEmbeddings(Embeddings):
-    """
-    OpenAI text-embedding-3-small via REST API.
-    ~$0.00002 per 1K tokens — very cheap but not free.
-    Falls back to this only if GOOGLE_API_KEY is not set.
-    """
-
-    def __init__(self, api_key: str):
-        self.api_key = api_key
-        self.url     = "https://api.openai.com/v1/embeddings"
-        self.model   = "text-embedding-3-small"
-
-    def _embed_batch(self, texts: list[str]) -> list[list[float]]:
-        import urllib.request, json as _json
-
-        payload = _json.dumps({"model": self.model, "input": texts}).encode()
-        req     = urllib.request.Request(
-            self.url,
-            data    = payload,
-            headers = {
-                "Content-Type":  "application/json",
-                "Authorization": f"Bearer {self.api_key}",
-            },
-            method = "POST",
-        )
-        with urllib.request.urlopen(req, timeout=30) as resp:
-            result = _json.loads(resp.read())
-
-        return [item["embedding"] for item in result["data"]]
-
-    def embed_documents(self, texts: list[str]) -> list[list[float]]:
-        # OpenAI allows up to 2048 inputs per request — batch in 100 to be safe
-        all_emb: list[list[float]] = []
-        for i in range(0, len(texts), 100):
-            all_emb.extend(self._embed_batch(texts[i: i + 100]))
-        return all_emb
-
-    def embed_query(self, text: str) -> list[float]:
-        return self._embed_batch([text])[0]
-
-
 class TFIDFEmbeddings(Embeddings):
     """
-    Pure Python TF-IDF fallback — truly zero external dependencies.
-    Quality is lower than neural embeddings but uses ~0MB RAM.
-    Only used when no API keys are configured.
-    Vectors are 512-dimensional sparse float lists.
+    Pure Python fallback — zero dependencies, zero RAM.
+    Used when GOOGLE_API_KEY is not set.
+    Lower quality but never crashes.
     """
 
     VOCAB_SIZE = 512
 
     def __init__(self):
-        self._vocab: dict[str, int] = {}
-        self._idf:   dict[str, float] = {}
+        self._vocab:   dict[str, int]   = {}
+        self._idf:     dict[str, float] = {}
         self._fitted = False
 
     def _tokenize(self, text: str) -> list[str]:
@@ -213,20 +171,15 @@ class TFIDFEmbeddings(Embeddings):
 
     def _fit(self, texts: list[str]) -> None:
         import math
-        N    = len(texts)
+        N  = len(texts)
         df: dict[str, int] = {}
         for t in texts:
             for tok in set(self._tokenize(t)):
                 df[tok] = df.get(tok, 0) + 1
-
-        # Keep top VOCAB_SIZE tokens by document frequency
-        top = sorted(df.items(), key=lambda x: x[1], reverse=True)[: self.VOCAB_SIZE]
-        self._vocab = {tok: i for i, (tok, _) in enumerate(top)}
-        self._idf   = {
-            tok: math.log((N + 1) / (cnt + 1)) + 1
-            for tok, cnt in top
-        }
-        self._fitted = True
+        top = sorted(df.items(), key=lambda x: x[1], reverse=True)[:self.VOCAB_SIZE]
+        self._vocab   = {tok: i for i, (tok, _) in enumerate(top)}
+        self._idf     = {tok: math.log((N+1)/(cnt+1))+1 for tok, cnt in top}
+        self._fitted  = True
 
     def _vectorize(self, text: str) -> list[float]:
         import math
@@ -234,16 +187,12 @@ class TFIDFEmbeddings(Embeddings):
         tf: dict[str, int] = {}
         for tok in tokens:
             tf[tok] = tf.get(tok, 0) + 1
-
         vec = [0.0] * self.VOCAB_SIZE
         for tok, idx in self._vocab.items():
             if tok in tf:
-                tfidf    = (tf[tok] / max(len(tokens), 1)) * self._idf.get(tok, 1.0)
-                vec[idx] = tfidf
-
-        # L2 normalise
-        norm = math.sqrt(sum(v * v for v in vec)) or 1.0
-        return [v / norm for v in vec]
+                vec[idx] = (tf[tok] / max(len(tokens), 1)) * self._idf.get(tok, 1.0)
+        norm = math.sqrt(sum(v*v for v in vec)) or 1.0
+        return [v/norm for v in vec]
 
     def embed_documents(self, texts: list[str]) -> list[list[float]]:
         if not self._fitted:
@@ -254,10 +203,9 @@ class TFIDFEmbeddings(Embeddings):
         return self._vectorize(text)
 
 
-# ── Embedding singleton ───────────────────────────────────────────────────────
+# ── Singleton ─────────────────────────────────────────────────────────────────
 
 _embeddings_instance: Embeddings | None = None
-
 
 def _get_embeddings() -> Embeddings:
     global _embeddings_instance
@@ -265,15 +213,10 @@ def _get_embeddings() -> Embeddings:
         return _embeddings_instance
 
     if GOOGLE_API_KEY:
-        print("[RAG] Using Google Gemini embeddings (free, 0MB RAM)")
+        print("[RAG] Using Google Gemini embeddings (0MB RAM)")
         _embeddings_instance = GeminiEmbeddings(GOOGLE_API_KEY)
-
-    elif OPENAI_API_KEY:
-        print("[RAG] Using OpenAI embeddings (paid, 0MB RAM)")
-        _embeddings_instance = OpenAIEmbeddings(OPENAI_API_KEY)
-
     else:
-        print("[RAG] WARNING: No API keys found. Using TF-IDF fallback (lower quality).")
+        print("[RAG] No GOOGLE_API_KEY — using TF-IDF fallback")
         _embeddings_instance = TFIDFEmbeddings()
 
     return _embeddings_instance
@@ -286,20 +229,17 @@ def _clean_text(raw: str) -> str:
     text = text.replace("\ufb01", "fi").replace("\ufb02", "fl")
     for ch in ["\ue072","\ue073","\ue074","\ue075","\ue076","\ue077","\ue078","\ue079"]:
         text = text.replace(ch, "•")
-    text = re.sub(r"\n{3,}", "\n\n", text)
-    return text.strip()
+    return re.sub(r"\n{3,}", "\n\n", text).strip()
 
 
-# ── Sub-chunker ───────────────────────────────────────────────────────────────
+# ── Chunker ───────────────────────────────────────────────────────────────────
 
 def _sub_chunk(text: str, max_chars: int, overlap: int) -> list[str]:
     if len(text) <= max_chars:
         return [text]
-
     paragraphs = re.split(r"\n\n+", text)
     chunks: list[str] = []
     current = ""
-
     for para in paragraphs:
         if len(current) + len(para) + 2 <= max_chars:
             current = (current + "\n\n" + para).strip()
@@ -312,24 +252,16 @@ def _sub_chunk(text: str, max_chars: int, overlap: int) -> list[str]:
                 current = ""
             else:
                 current = para
-
     if current:
         chunks.append(current)
-
-    return chunks if chunks else [text]
+    return chunks or [text]
 
 
 # ── Ingestion ─────────────────────────────────────────────────────────────────
 
 def ingest_pdf(file_path: str, session_id: str) -> dict:
-    """
-    Memory-safe ingestion — page by page, batch embedding, temp file deleted.
-    """
     if LOW_MEMORY_MODE:
-        raise ValueError(
-            "PDF Chat is currently unavailable on this deployment. "
-            "Please contact support."
-        )
+        raise ValueError("PDF Chat is currently unavailable on this deployment.")
 
     from pypdf import PdfReader
 
@@ -344,17 +276,14 @@ def ingest_pdf(file_path: str, session_id: str) -> dict:
     all_chunks: list[Document] = []
 
     for page_num, page in enumerate(pages):
-        raw_text = page.extract_text() or ""
-        if not raw_text.strip():
+        raw = page.extract_text() or ""
+        if not raw.strip():
             continue
-
-        clean = _clean_text(raw_text)
-        sub   = _sub_chunk(clean, MAX_SECTION_CHARS, SECTION_OVERLAP)
-
-        for idx, chunk_text in enumerate(sub):
+        clean = _clean_text(raw)
+        for idx, chunk_text in enumerate(_sub_chunk(clean, MAX_SECTION_CHARS, SECTION_OVERLAP)):
             all_chunks.append(Document(
-                page_content=chunk_text,
-                metadata={
+                page_content = chunk_text,
+                metadata     = {
                     "page":         page_num + 1,
                     "section_name": f"Page {page_num + 1}",
                     "section_num":  page_num + 1,
@@ -362,8 +291,7 @@ def ingest_pdf(file_path: str, session_id: str) -> dict:
                     "chunk_idx":    idx,
                 },
             ))
-
-        del raw_text, clean, sub
+        del raw, clean
         gc.collect()
 
     del reader, pages
@@ -372,7 +300,6 @@ def ingest_pdf(file_path: str, session_id: str) -> dict:
     if not all_chunks:
         raise ValueError("PDF has no extractable text. May be scanned/image-only.")
 
-    # Embed in batches of 20
     BATCH_SIZE = 20
     for i in range(0, len(all_chunks), BATCH_SIZE):
         batch = all_chunks[i: i + BATCH_SIZE]
@@ -389,11 +316,10 @@ def ingest_pdf(file_path: str, session_id: str) -> dict:
     del all_chunks
     gc.collect()
 
-    # Delete temp file immediately
     try:
         Path(file_path).unlink(missing_ok=True)
     except Exception as e:
-        print(f"[RAG] Warning: could not delete temp file: {e}")
+        print(f"[RAG] Could not delete temp file: {e}")
 
     return {
         "session_id":  session_id,
@@ -405,90 +331,52 @@ def ingest_pdf(file_path: str, session_id: str) -> dict:
 
 # ── Reranker ──────────────────────────────────────────────────────────────────
 
-def _rerank(
-    question: str,
-    docs_with_scores: list[tuple],
-    top_n: int = TOP_K_FINAL,
-) -> list[tuple]:
-    q_lower  = question.lower()
-    q_tokens = set(re.sub(r"[^\w\s]", "", q_lower).split())
-
-    def _score(doc, emb_score: float) -> float:
+def _rerank(question: str, docs_with_scores: list[tuple], top_n: int = TOP_K_FINAL) -> list[tuple]:
+    q_tokens = set(re.sub(r"[^\w\s]", "", question.lower()).split())
+    def _score(doc, emb: float) -> float:
         text  = doc.page_content.lower()
-        hits  = sum(1 for tok in q_tokens if tok in text)
-        kw    = hits / max(len(q_tokens), 1)
-        sname = doc.metadata.get("section_name", "").lower()
-        bonus = 0.08 if any(tok in sname for tok in q_tokens) else 0.0
-        return 0.70 * emb_score + 0.30 * kw + bonus
-
+        kw    = sum(1 for t in q_tokens if t in text) / max(len(q_tokens), 1)
+        bonus = 0.08 if any(t in doc.metadata.get("section_name","").lower() for t in q_tokens) else 0
+        return 0.70 * emb + 0.30 * kw + bonus
     return sorted(docs_with_scores, key=lambda x: _score(x[0], x[1]), reverse=True)[:top_n]
 
 
 # ── Context builder ───────────────────────────────────────────────────────────
 
 def _build_context(docs_with_scores: list[tuple]) -> str:
-    parts = []
-    for i, (doc, score) in enumerate(docs_with_scores, 1):
-        section = doc.metadata.get("section_name", "unknown")
-        parts.append(
-            f'<chunk id="{i}" section="{section}" relevance="{score:.2f}">\n'
-            f"{doc.page_content.strip()}\n</chunk>"
-        )
-    return "\n\n".join(parts)
+    return "\n\n".join(
+        f'<chunk id="{i}" section="{d.metadata.get("section_name","?")}" relevance="{s:.2f}">\n{d.page_content.strip()}\n</chunk>'
+        for i, (d, s) in enumerate(docs_with_scores, 1)
+    )
 
 
 # ── Chat ──────────────────────────────────────────────────────────────────────
 
-def chat_with_pdf(
-    session_id: str,
-    question:   str,
-    history:    list[tuple[str, str]],
-) -> Generator[str, None, None]:
+def chat_with_pdf(session_id: str, question: str, history: list[tuple[str, str]]) -> Generator[str, None, None]:
     if LOW_MEMORY_MODE:
-        yield "PDF Chat is currently unavailable on this deployment due to memory constraints."
+        yield "PDF Chat is currently unavailable on this deployment."
         return
 
     vectorstore = Chroma(
-        collection_name   = f"session_{session_id}",
+        collection_name    = f"session_{session_id}",
         embedding_function = _get_embeddings(),
-        persist_directory = str(CHROMA_DIR),
+        persist_directory  = str(CHROMA_DIR),
     )
 
-    raw_results = vectorstore.similarity_search_with_relevance_scores(
-        question, k=TOP_K_RETRIEVE
-    )
-
-    filtered = [(d, s) for d, s in raw_results if s >= MIN_SCORE]
-    if not filtered:
-        filtered = [(d, s) for d, s in raw_results if s >= 0.15]
+    raw      = vectorstore.similarity_search_with_relevance_scores(question, k=TOP_K_RETRIEVE)
+    filtered = [(d, s) for d, s in raw if s >= MIN_SCORE] or [(d, s) for d, s in raw if s >= 0.15]
 
     if not filtered:
-        top_sections = list({d.metadata.get("section_name","?") for d,_ in raw_results[:3]})
-        yield (
-            f'Could not find content relevant to "{question}" in this document.\n\n'
-            f"Document covers: {', '.join(top_sections)}.\n\n"
-            f"Try rephrasing using terms from the document."
-        )
+        sections = list({d.metadata.get("section_name","?") for d,_ in raw[:3]})
+        yield f'Could not find content for "{question}".\nDocument covers: {", ".join(sections)}.'
         return
 
-    best    = _rerank(question, filtered)
-    context = _build_context(best)
-
-    del raw_results, filtered, best
+    context = _build_context(_rerank(question, filtered))
+    del raw, filtered
     gc.collect()
 
-    history_text = "".join(
-        f"<user>{q}</user>\n<assistant>{a}</assistant>\n"
-        for q, a in history[-MAX_HISTORY:]
-    )
-
-    prompt = (
-        f"{_SYSTEM_PROMPT}\n\n"
-        f"=== DOCUMENT CHUNKS ===\n{context}\n\n"
-        f"=== HISTORY ===\n{history_text or '(none)'}\n\n"
-        f"=== QUESTION ===\n{question}\n\n"
-        f"=== ANSWER ==="
-    )
+    history_text = "".join(f"<user>{q}</user>\n<assistant>{a}</assistant>\n" for q, a in history[-MAX_HISTORY:])
+    prompt = f"{_SYSTEM_PROMPT}\n\n=== CHUNKS ===\n{context}\n\n=== HISTORY ===\n{history_text or '(none)'}\n\n=== QUESTION ===\n{question}\n\n=== ANSWER ==="
 
     del context, history_text
     gc.collect()
@@ -497,43 +385,35 @@ def chat_with_pdf(
         yield chunk.content
 
 
-# ── Source inspection ─────────────────────────────────────────────────────────
+# ── Sources ───────────────────────────────────────────────────────────────────
 
 def get_top_sources(session_id: str, question: str) -> list[dict]:
     if LOW_MEMORY_MODE:
         return []
-
     vectorstore = Chroma(
-        collection_name   = f"session_{session_id}",
+        collection_name    = f"session_{session_id}",
         embedding_function = _get_embeddings(),
-        persist_directory = str(CHROMA_DIR),
+        persist_directory  = str(CHROMA_DIR),
     )
-
     raw      = vectorstore.similarity_search_with_relevance_scores(question, k=TOP_K_RETRIEVE)
-    reranked = _rerank(question, raw)
     result   = [
-        {
-            "section":          d.metadata.get("section_name", "unknown"),
-            "snippet":          d.page_content[:200].strip(),
-            "score":            round(s, 3),
-            "passed_threshold": s >= MIN_SCORE,
-        }
-        for d, s in reranked
+        {"section": d.metadata.get("section_name","?"), "snippet": d.page_content[:200].strip(), "score": round(s,3), "passed_threshold": s >= MIN_SCORE}
+        for d, s in _rerank(question, raw)
     ]
-    del raw, reranked
+    del raw
     gc.collect()
     return result
 
 
-# ── Session cleanup ───────────────────────────────────────────────────────────
+# ── Cleanup ───────────────────────────────────────────────────────────────────
 
 def delete_session(session_id: str) -> None:
     try:
         Chroma(
-            collection_name   = f"session_{session_id}",
+            collection_name    = f"session_{session_id}",
             embedding_function = _get_embeddings(),
-            persist_directory = str(CHROMA_DIR),
+            persist_directory  = str(CHROMA_DIR),
         ).delete_collection()
         gc.collect()
-    except Exception as exc:
-        print(f"[RAG] cleanup warning for session {session_id}: {exc}")
+    except Exception as e:
+        print(f"[RAG] cleanup warning: {e}")
