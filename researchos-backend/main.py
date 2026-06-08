@@ -143,6 +143,15 @@ CurrentUser = Annotated[dict, Depends(get_current_user)]
 
 # ── Health ────────────────────────────────────────────────────────────────────
 
+@app.get("/")
+async def root():
+    return {"status": "ok", "service": "ResearchOS"}
+
+@app.head("/")
+async def root_head():
+    return {}
+
+
 @app.get("/api/health")
 async def health():
     return {"status": "ok", "service": "ResearchOS", "version": "2.0.0"}
@@ -682,4 +691,12 @@ async def dashboard_chat(body: dict, current_user: CurrentUser = None):
 
 
 if __name__ == "__main__":
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+    port   = int(os.getenv("PORT", 8000))          # Render sets PORT=10000
+    debug  = os.getenv("RENDER", "") == ""         # True locally, False on Render
+    uvicorn.run(
+        "main:app",
+        host    = "0.0.0.0",
+        port    = port,
+        reload  = debug,   # reload=True locally, reload=False on Render
+        workers = 1,       # always 1 — more workers = OOM on free tier
+    )
