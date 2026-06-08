@@ -79,61 +79,53 @@ FORMAT: Paragraph with [Chunk N] citations. End with: Sources: Chunk N (section:
 
 class GeminiEmbeddings(Embeddings):
     """
-    Google Gemini text-embedding-004 via REST API.
+    Google Gemini embeddings via REST API.
+    Uses embedContent (single) endpoint — works on all free tier keys.
     Free tier: 1500 requests/day, 100 requests/minute.
-    Sign up: https://aistudio.google.com/app/apikey (no credit card needed)
+    Get key: https://aistudio.google.com/app/apikey (no credit card)
     """
 
     def __init__(self, api_key: str):
-        self.api_key = api_key
-        self.model   = "models/text-embedding-004"
-        self.url     = (
-            f"https://generativelanguage.googleapis.com/v1beta/"
-            f"{self.model}:batchEmbedContents?key={api_key}"
+        self.api_key  = api_key
+        self.model    = "text-embedding-004"
+        self.base_url = "https://generativelanguage.googleapis.com/v1beta/models"
+
+    def _embed_one(self, text: str) -> list[float]:
+        import urllib.request, json as _json, urllib.error
+
+        url     = f"{self.base_url}/{self.model}:embedContent?key={self.api_key}"
+        payload = _json.dumps({
+            "model":   f"models/{self.model}",
+            "content": {"parts": [{"text": text[:8000]}]},
+        }).encode()
+
+        req = urllib.request.Request(
+            url,
+            data    = payload,
+            headers = {"Content-Type": "application/json"},
+            method  = "POST",
         )
-
-    def _embed_batch(self, texts: list[str]) -> list[list[float]]:
-        import urllib.request, json as _json
-
-        # Gemini batch endpoint: max 100 texts per request
-        BATCH = 100
-        all_embeddings: list[list[float]] = []
-
-        for i in range(0, len(texts), BATCH):
-            chunk = texts[i: i + BATCH]
-            payload = {
-                "requests": [
-                    {
-                        "model":   self.model,
-                        "content": {"parts": [{"text": t}]},
-                    }
-                    for t in chunk
-                ]
-            }
-            data    = _json.dumps(payload).encode()
-            req     = urllib.request.Request(
-                self.url,
-                data    = data,
-                headers = {"Content-Type": "application/json"},
-                method  = "POST",
-            )
+        try:
             with urllib.request.urlopen(req, timeout=30) as resp:
                 result = _json.loads(resp.read())
-
-            for item in result.get("embeddings", []):
-                all_embeddings.append(item["values"])
-
-            # Respect 100 req/min rate limit
-            if i + BATCH < len(texts):
-                time.sleep(0.7)
-
-        return all_embeddings
+            return result["embedding"]["values"]
+        except urllib.error.HTTPError as e:
+            body = e.read().decode("utf-8", errors="ignore")
+            raise RuntimeError(f"Gemini API error {e.code}: {body}") from e
 
     def embed_documents(self, texts: list[str]) -> list[list[float]]:
-        return self._embed_batch(texts)
+        embeddings = []
+        for i, text in enumerate(texts):
+            embeddings.append(self._embed_one(text))
+            # Stay under 100 req/min free tier limit
+            if i > 0 and i % 90 == 0:
+                time.sleep(62)
+            elif i > 0 and i % 10 == 0:
+                time.sleep(1)
+        return embeddings
 
     def embed_query(self, text: str) -> list[float]:
-        return self._embed_batch([text])[0]
+        return self._embed_one(text)
 
 
 class OpenAIEmbeddings(Embeddings):
