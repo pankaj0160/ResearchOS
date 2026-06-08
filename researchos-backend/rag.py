@@ -80,61 +80,55 @@ class GeminiEmbeddings(Embeddings):
     def _get_client(self):
         if self._client is None:
             try:
-                import google.generativeai as genai
+                from google import genai
+                from google.genai import types
             except ImportError:
                 raise RuntimeError(
-                    "google-generativeai not installed. "
-                    "Run: pip install google-generativeai"
+                    "google-genai not installed. "
+                    "Run: pip install google-genai"
                 )
-            genai.configure(api_key=self.api_key)
-            self._client = genai
+            self._client = genai.Client(api_key=self.api_key)
         return self._client
 
     def _resolve_model(self) -> str:
-        """Find first model supported by this API key."""
         if self._model_name:
             return self._model_name
 
-        genai = self._get_client()
+        client = self._get_client()
 
-        # Ask the API which models support embedContent
         try:
             available = [
-                m.name for m in genai.list_models()
-                if "embedContent" in m.supported_generation_methods
+                m.name for m in client.models.list()
+                if m.supported_actions and "embedContent" in m.supported_actions
             ]
             print(f"[RAG] Available embedding models: {available}")
         except Exception as e:
-            print(f"[RAG] Could not list models ({e}), trying defaults.")
+            print(f"[RAG] Could not list models ({e}), using defaults.")
             available = self._MODELS
 
-        # Pick first match from our preference list
         for preferred in self._MODELS:
             if preferred in available:
                 self._model_name = preferred
                 print(f"[RAG] Using embedding model: {preferred}")
                 return self._model_name
 
-        # Use whatever is available
         if available:
             self._model_name = available[0]
-            print(f"[RAG] Using first available model: {self._model_name}")
+            print(f"[RAG] Using first available: {self._model_name}")
             return self._model_name
 
-        raise RuntimeError(
-            "No embedding models available for your Google API key. "
-            "Check that the Generative Language API is enabled at "
-            "console.cloud.google.com/apis/library/generativelanguage.googleapis.com"
-        )
+        # Hardcode best known working model as last resort
+        self._model_name = "models/gemini-embedding-001"
+        return self._model_name
 
     def _embed_one(self, text: str) -> list[float]:
-        genai  = self._get_client()
+        client = self._get_client()
         model  = self._resolve_model()
-        result = genai.embed_content(
+        result = client.models.embed_content(
             model   = model,
-            content = text[:8000],
+            contents = text[:8000],
         )
-        return result["embedding"]
+        return result.embeddings[0].values
 
     def embed_documents(self, texts: list[str]) -> list[list[float]]:
         embeddings = []
