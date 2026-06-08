@@ -86,32 +86,56 @@ class GeminiEmbeddings(Embeddings):
     """
 
     def __init__(self, api_key: str):
-        self.api_key  = api_key
-        self.model    = "text-embedding-004"
+        self.api_key = api_key
+        # v1 (not v1beta) + gemini-embedding-exp-03-07 is the correct
+        # free-tier model. text-embedding-004 requires v1beta enterprise.
         self.base_url = "https://generativelanguage.googleapis.com/v1beta/models"
+        self.model    = "gemini-embedding-exp-03-07"
 
     def _embed_one(self, text: str) -> list[float]:
-        import urllib.request, json as _json, urllib.error
+        import urllib.request as _req, json as _json, urllib.error as _err
 
-        url     = f"{self.base_url}/{self.model}:embedContent?key={self.api_key}"
-        payload = _json.dumps({
-            "model":   f"models/{self.model}",
-            "content": {"parts": [{"text": text[:8000]}]},
-        }).encode()
+        # Try primary model, fall back to embedding-001 if not found
+        models_to_try = [
+            ("https://generativelanguage.googleapis.com/v1beta/models", "gemini-embedding-exp-03-07"),
+            ("https://generativelanguage.googleapis.com/v1beta/models", "text-embedding-004"),
+            ("https://generativelanguage.googleapis.com/v1/models",     "text-embedding-004"),
+            ("https://generativelanguage.googleapis.com/v1beta/models", "embedding-001"),
+            ("https://generativelanguage.googleapis.com/v1/models",     "embedding-001"),
+        ]
 
-        req = urllib.request.Request(
-            url,
-            data    = payload,
-            headers = {"Content-Type": "application/json"},
-            method  = "POST",
-        )
-        try:
-            with urllib.request.urlopen(req, timeout=30) as resp:
-                result = _json.loads(resp.read())
-            return result["embedding"]["values"]
-        except urllib.error.HTTPError as e:
-            body = e.read().decode("utf-8", errors="ignore")
-            raise RuntimeError(f"Gemini API error {e.code}: {body}") from e
+        last_error = None
+        for base, model in models_to_try:
+            url     = f"{base}/{model}:embedContent?key={self.api_key}"
+            payload = _json.dumps({
+                "model":   f"models/{model}",
+                "content": {"parts": [{"text": text[:8000]}]},
+            }).encode()
+            request = _req.Request(
+                url,
+                data    = payload,
+                headers = {"Content-Type": "application/json"},
+                method  = "POST",
+            )
+            try:
+                with _req.urlopen(request, timeout=30) as resp:
+                    result = _json.loads(resp.read())
+                # Cache the working combo so we stop trying others
+                self.base_url = base
+                self.model    = model
+                return result["embedding"]["values"]
+            except _err.HTTPError as e:
+                body = e.read().decode("utf-8", errors="ignore")
+                last_error = f"{e.code}: {body[:200]}"
+                if e.code == 429:
+                    # Rate limit — stop and raise immediately
+                    raise RuntimeError(f"Gemini rate limit hit. Wait 1 min and retry.") from e
+                continue  # 404 = try next model
+            except Exception as e:
+                last_error = str(e)
+                continue
+
+        raise RuntimeError(f"All Gemini embedding models failed. Last error: {last_error}")
 
     def embed_documents(self, texts: list[str]) -> list[list[float]]:
         embeddings = []
