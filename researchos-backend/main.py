@@ -39,6 +39,7 @@ from __future__ import annotations
 
 from auth import decode_token
 import json
+import gc      
 import os
 import secrets
 from contextlib import asynccontextmanager
@@ -104,6 +105,12 @@ async def event_stream():
 
     except Exception as exc:
         yield f"data: {json.dumps({'type': 'error', 'msg': str(exc)})}\n\n"
+
+
+
+
+
+
 
 
 # ── App ───────────────────────────────────────────────────────────────────────
@@ -285,32 +292,37 @@ async def research_stream(
         report   = ""
         feedback = ""
         last_ping = asyncio.get_event_loop().time()
-
+ 
         try:
             async for event in run_pipeline_async(topic):
-                # Keep Render proxy alive — ping every 15s of silence
                 now = asyncio.get_event_loop().time()
                 if now - last_ping > 15:
                     yield f"data: {json.dumps({'type': 'ping'})}\n\n"
                     last_ping = now
-
+ 
                 if event.get("agent") == "writer" and event.get("type") in ("chunk", "streaming"):
                     report += event.get("msg", "")
                 if event.get("agent") == "critic" and event.get("type") in ("chunk", "streaming"):
                     feedback += event.get("msg", "")
-
+ 
                 yield f"data: {json.dumps(event)}\n\n"
                 last_ping = asyncio.get_event_loop().time()
-
+ 
             if report:
                 run_id = save_run(topic, report, feedback, user_id=user_id)
                 yield f"data: {json.dumps({'type': 'saved', 'run_id': run_id})}\n\n"
-
+ 
             yield f"data: {json.dumps({'type': 'done'})}\n\n"
-
+ 
         except Exception as exc:
             yield f"data: {json.dumps({'type': 'error', 'msg': str(exc)})}\n\n"
-
+ 
+        finally:
+            # ── Free research pipeline memory after every run ──────────────
+            del report, feedback
+            gc.collect()
+ 
+ 
     return StreamingResponse(
         event_stream(),
         media_type="text/event-stream",
@@ -418,6 +430,8 @@ async def rag_upload(
     page_count  = ingest_result.get("page_count",  0) if isinstance(ingest_result, dict) else 0
     chunk_count = ingest_result.get("chunk_count", 0) if isinstance(ingest_result, dict) else 0
 
+    gc.collect()
+ 
     return {
         "session_id":  session_id,
         "filename":    file.filename,
