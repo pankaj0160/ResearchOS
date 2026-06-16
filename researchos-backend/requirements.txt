@@ -60,3 +60,9 @@ google-genai>=1.0.0
 # sentence-transformers
 # transformers
 # langchain-huggingface
+
+
+# ── Dev / CLI ──
+rich>=13.9.0
+pytest>=8.0.0
+pytest-asyncio>=0.23.0
