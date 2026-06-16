@@ -1,6 +1,8 @@
 name: CI — ResearchOS Test Suite
 
 on:
+  env:
+    FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
   push:
     branches: [ main ]
   pull_request:
@@ -18,11 +20,11 @@ jobs:
     steps:
       # 1. Check out your code
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v4.2.2
 
       # 2. Install Python 3.12 (same version you use locally)
       - name: Set up Python 3.12
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v5.6.0
         with:
           python-version: "3.12"
           cache: "pip"
