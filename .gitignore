@@ -80,6 +80,14 @@ chroma_db/
 data/chroma/
 persist_directory/
 
+
+# ResearchOS Week 1 additions
+researchos-backend/chroma_store/
+researchos-backend/uploads/
+researchos-backend/*.json
+researchos-backend/researchos.db
+
+
 # =========================
 
 # Vector Databases
