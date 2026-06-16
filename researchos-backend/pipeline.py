@@ -1,8 +1,10 @@
 import asyncio
 import os
 import time
+import re
 import traceback
 from typing import AsyncGenerator, Generator
+from langsmith import traceable
 
 from dotenv import load_dotenv
 from pathlib import Path
@@ -23,10 +25,22 @@ def _ev(agent: str, type_: str, msg: str, tool: str | None = None) -> dict:
     return {"agent": agent, "type": type_, "msg": msg, "tool": tool}
 
 
+QUALITY_THRESHOLD = 0.7   # i.e. 7/10
+MAX_RETRIES       = 2     # up to 2 revision attempts after the first draft
+
+
+def _parse_score(feedback: str) -> float | None:
+    """Extract the critic's score (e.g. 'Score: 6/10') and normalize to 0-1."""
+    m = re.search(r"Score:\s*(\d+(?:\.\d+)?)\s*/\s*10", feedback, re.IGNORECASE)
+    if m:
+        return float(m.group(1)) / 10.0
+    return None
+
 # ═════════════════════════════════════════════════════════════════════════════
 # REAL PIPELINE
 # ═════════════════════════════════════════════════════════════════════════════
 
+@traceable(name="research_pipeline", run_type="chain")
 def run_real_pipeline(topic: str) -> Generator[dict, None, None]:
     from agents import (
         get_tool_llm,
@@ -35,6 +49,7 @@ def run_real_pipeline(topic: str) -> Generator[dict, None, None]:
         run_reader_agent,
         build_writer_chain,
         build_critic_chain,
+        build_writer_revision_chain,
     )
 
     state: dict = {}
@@ -91,52 +106,101 @@ def run_real_pipeline(topic: str) -> Generator[dict, None, None]:
               f"Extracted {len(state['scraped_content'])} chars of page content")
     yield _ev("reader", "complete", "Reader phase complete")
 
-    # ══ STEP 3 — Writer Chain ════════════════════════════════════════════════
-    yield _ev("writer", "thinking",
-              "Synthesising search + scraped data into Markdown report...")
-
+    # ══ STEP 3 & 4 — Writer + Critic, with Reflexion-style quality gate ═══════
     research_combined = (
         f"SEARCH RESULTS:\n{state['search_results']}\n\n"
         f"SCRAPED PAGE CONTENT:\n{state['scraped_content']}"
     )
 
     try:
-        print(f"[Pipeline] Starting writer chain...")
-        writer_chain  = build_writer_chain(chain_llm)
-        report_chunks: list[str] = []
-        for chunk in writer_chain.stream({"topic": topic, "research": research_combined}):
-            report_chunks.append(chunk)
-            yield _ev("writer", "streaming", chunk)
-        state["report"] = "".join(report_chunks)
-        print(f"[Pipeline] Writer chain done — {len(state['report'])} chars")
+        writer_chain   = build_writer_chain(chain_llm)
+        revision_chain = build_writer_revision_chain(chain_llm)
+        critic_chain   = build_critic_chain(chain_llm)
     except Exception as exc:
-        print(f"[Pipeline] Writer chain EXCEPTION:\n{traceback.format_exc()}")
-        yield _ev("writer", "error", f"Writer chain failed: {exc}")
+        yield _ev("writer", "error", f"Chain setup failed: {exc}")
         return
 
-    yield _ev("writer", "complete", "Report drafted successfully")
+    for attempt in range(MAX_RETRIES + 1):
+        is_retry = attempt > 0
 
-    # ══ STEP 4 — Critic Chain ════════════════════════════════════════════════
-    yield _ev("critic", "thinking",
-              "Evaluating report quality, factual consistency, and structure...")
+        # ── Writer (first draft) or Reviser (retry) ─────────────────────────
+        if is_retry:
+            yield _ev("writer", "thinking",
+                      f"Quality gate: previous score {state['last_score']*10:.1f}/10 "
+                      f"< 7/10 — revising report (attempt {attempt+1}/{MAX_RETRIES+1})")
+            yield _ev("writer", "reset", "")
+            stream_input = {
+                "topic": topic,
+                "research": research_combined,
+                "previous_report": state["report"],
+                "feedback": state["feedback"],
+            }
+            chain_to_run = revision_chain
+        else:
+            yield _ev("writer", "thinking",
+                      "Synthesising search + scraped data into Markdown report...")
+            stream_input = {"topic": topic, "research": research_combined}
+            chain_to_run = writer_chain
 
-    try:
-        print(f"[Pipeline] Starting critic chain...")
-        critic_chain    = build_critic_chain(chain_llm)
-        feedback_chunks: list[str] = []
-        for chunk in critic_chain.stream({"report": state["report"]}):
-            feedback_chunks.append(chunk)
-            yield _ev("critic", "streaming", chunk)
-        state["feedback"] = "".join(feedback_chunks)
-        print(f"[Pipeline] Critic chain done — {len(state['feedback'])} chars")
-    except Exception as exc:
-        print(f"[Pipeline] Critic chain EXCEPTION:\n{traceback.format_exc()}")
-        yield _ev("critic", "error", f"Critic chain failed: {exc}")
-        return
+        try:
+            print(f"[Pipeline] Writer attempt {attempt+1}/{MAX_RETRIES+1}...")
+            report_chunks: list[str] = []
+            for chunk in chain_to_run.stream(stream_input):
+                report_chunks.append(chunk)
+                yield _ev("writer", "streaming", chunk)
+            state["report"] = "".join(report_chunks)
+            print(f"[Pipeline] Writer attempt {attempt+1} done — {len(state['report'])} chars")
+        except Exception as exc:
+            print(f"[Pipeline] Writer EXCEPTION:\n{traceback.format_exc()}")
+            yield _ev("writer", "error", f"Writer chain failed: {exc}")
+            return
 
-    yield _ev("critic", "complete", "Critique complete — pipeline finished")
+        yield _ev("writer", "complete",
+                  "Report revised" if is_retry else "Report drafted successfully")
+
+        # ── Critic ───────────────────────────────────────────────────────────
+        if is_retry:
+            yield _ev("critic", "reset", "")
+
+        yield _ev("critic", "thinking",
+                  "Evaluating report quality, factual consistency, and structure...")
+
+        try:
+            print(f"[Pipeline] Critic evaluating attempt {attempt+1}...")
+            feedback_chunks: list[str] = []
+            for chunk in critic_chain.stream({"report": state["report"]}):
+                feedback_chunks.append(chunk)
+                yield _ev("critic", "streaming", chunk)
+            state["feedback"] = "".join(feedback_chunks)
+            print(f"[Pipeline] Critic done — {len(state['feedback'])} chars")
+        except Exception as exc:
+            print(f"[Pipeline] Critic EXCEPTION:\n{traceback.format_exc()}")
+            yield _ev("critic", "error", f"Critic chain failed: {exc}")
+            return
+
+        score = _parse_score(state["feedback"])
+        state["last_score"] = score if score is not None else 1.0
+        print(f"[Pipeline] Attempt {attempt+1} score: {score}")
+
+        if score is None:
+            yield _ev("critic", "complete", "Critique complete — pipeline finished")
+            break
+
+        if score >= QUALITY_THRESHOLD:
+            yield _ev("critic", "complete",
+                      f"Critique complete — score {score*10:.1f}/10, passed quality gate")
+            break
+
+        if attempt == MAX_RETRIES:
+            yield _ev("critic", "complete",
+                      f"Critique complete — score {score*10:.1f}/10, "
+                      f"max retries ({MAX_RETRIES}) reached")
+            break
+
+        yield _ev("critic", "complete",
+                  f"Score {score*10:.1f}/10 — below 7/10 threshold, triggering retry")
+
     print(f"[Pipeline] All steps complete for topic: {topic!r}")
-
 
 # ═════════════════════════════════════════════════════════════════════════════
 # SIMULATION PIPELINE

@@ -98,6 +98,19 @@ export function useSSEStream() {
       return
     }
 
+
+    // ── Reset accumulated text on quality-gate retry ────────────────────────────
+    if (type === 'reset') {
+      if (agent === 'writer') {
+        reportRef.current = ''
+        setReport('')
+      } else if (agent === 'critic') {
+        feedbackRef.current = ''
+        setFeedback('')
+      }
+      return
+    }
+
     // ── Writer streaming chunks ───────────────────────────────────────────────
     if (agent === 'writer' && type === 'streaming') {
       reportRef.current += message

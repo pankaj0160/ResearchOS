@@ -427,11 +427,12 @@ async def rag_upload(
     # 5. Store session metadata
     created_at = datetime.utcnow().isoformat()
     _rag_sessions[session_id] = {
-        "user_id":    current_user["id"],
-        "filename":   file.filename,
-        "file_path":  str(file_path),
-        "created_at": created_at,
-        "history":    [],
+        "user_id":       current_user["id"],
+        "filename":      file.filename,
+        "file_path":     str(file_path),
+        "collection_id": ingest_result.get("collection_id", session_id),
+        "created_at":    created_at,
+        "history":       [],
     }
 
     # ingest_pdf should return a dict with at least page_count and chunk_count.
@@ -447,6 +448,7 @@ async def rag_upload(
         "page_count":  page_count,
         "chunk_count": chunk_count,
         "created_at":  created_at,
+        "cached":      ingest_result.get("cached", False),
     }
 
 
@@ -493,13 +495,15 @@ async def rag_chat(body: RagChatRequest, current_user: CurrentUser):
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="Question cannot be empty.",
         )
+    
+    collection_id = session.get("collection_id", body.session_id)
 
     def event_stream():
         full_answer = ""
         try:
             # 4. Retrieve relevant source chunks
             try:
-                sources = get_top_sources(body.session_id, question)
+                sources = get_top_sources(collection_id, question)
             except Exception:
                 sources = []
 
@@ -507,7 +511,7 @@ async def rag_chat(body: RagChatRequest, current_user: CurrentUser):
             yield f"data: {json.dumps({'type': 'sources', 'sources': sources})}\n\n"
 
             # 5. Stream the answer token-by-token (pass history for multi-turn context)
-            for chunk in chat_with_pdf(body.session_id, question, session.get("history", [])):
+            for chunk in chat_with_pdf(collection_id, question, session.get("history", [])):
                 full_answer += chunk
                 yield f"data: {json.dumps({'type': 'chunk', 'chunk': chunk})}\n\n"
 
@@ -554,7 +558,12 @@ async def rag_delete_session(session_id: str, current_user: CurrentUser):
 
     # Remove from vector store
     try:
-        delete_session(session_id)
+        pass
+        # Note: we intentionally do NOT delete the underlying doc_{hash} collection here.
+        # Multiple sessions (or users) may share the same collection if they uploaded
+        # the same file. Deleting it would break other sessions still pointing at it.
+        # Trade-off: cached collections accumulate in chroma_store over time —
+        # a production system would need a ref-count or TTL-based cleanup job.
     except Exception:
         pass
 

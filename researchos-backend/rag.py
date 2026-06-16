@@ -11,6 +11,8 @@ pip install google-generativeai
 from __future__ import annotations
 
 import gc
+import json
+import hashlib
 import os
 import re
 import time
@@ -33,23 +35,62 @@ GOOGLE_API_KEY  = os.getenv("GOOGLE_API_KEY", "")
 CHROMA_DIR        = Path(__file__).parent / "chroma_store"
 MAX_SECTION_CHARS = 1000
 SECTION_OVERLAP   = 100
-TOP_K_RETRIEVE    = 8
-TOP_K_FINAL       = 4
+TOP_K_RETRIEVE    = 20
+TOP_K_FINAL       = 5
 MIN_SCORE         = 0.25
 MAX_HISTORY       = 3
 
 CHROMA_DIR.mkdir(exist_ok=True)
 
+
+
+def compute_file_hash(file_path: str) -> str:
+    """SHA256 fingerprint of a file's contents — used to detect duplicate uploads."""
+    h = hashlib.sha256()
+    with open(file_path, "rb") as f:
+        for block in iter(lambda: f.read(8192), b""):
+            h.update(block)
+    return h.hexdigest()[:16]
+
+
+def _meta_path(doc_hash: str) -> Path:
+    return CHROMA_DIR / f"{doc_hash}.json"
+
+
+def _save_meta(doc_hash: str, meta: dict) -> None:
+    _meta_path(doc_hash).write_text(json.dumps(meta))
+
+
+def _load_meta(doc_hash: str) -> dict:
+    return json.loads(_meta_path(doc_hash).read_text())
+
+
+def _collection_exists(doc_hash: str) -> bool:
+    import chromadb
+    client = chromadb.PersistentClient(path=str(CHROMA_DIR))
+    cols = client.list_collections()
+    names = [c.name if hasattr(c, "name") else c for c in cols]
+    return f"doc_{doc_hash}" in names
+
+
 _SYSTEM_PROMPT = """You are a precise document assistant.
 Answer ONLY from the document chunks provided. Never use outside knowledge.
 
 RULES:
-1. Cite every chunk inline as [Chunk N].
+1. Cite every claim inline as [Chunk N].
 2. Use ALL relevant chunks — do not stop after the first one.
 3. If the answer is not in the chunks, say: "This is not in the document."
 4. Never invent information.
 
-FORMAT: Paragraph with [Chunk N] citations. End with: Sources: Chunk N (section: X)
+FORMATTING (use Markdown):
+- If the answer is a list of items (problems, findings, dates, steps, names, etc.),
+  format it as a Markdown bulleted or numbered list — ONE ITEM PER LINE.
+  Do NOT cram a list into a single paragraph separated by commas.
+- If the answer covers multiple distinct topics or sections, use ## headings
+  to separate them.
+- Use **bold** for key terms, names, or numbers worth highlighting.
+- Keep paragraphs short — 2 to 4 sentences max.
+- End with a line: Sources: Chunk N (section: X), Chunk M (section: Y)
 """
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -124,11 +165,22 @@ class GeminiEmbeddings(Embeddings):
     def _embed_one(self, text: str) -> list[float]:
         client = self._get_client()
         model  = self._resolve_model()
-        result = client.models.embed_content(
-            model   = model,
-            contents = text[:8000],
-        )
-        return result.embeddings[0].values
+
+        max_retries = 4
+        for attempt in range(max_retries):
+            try:
+                result = client.models.embed_content(
+                    model    = model,
+                    contents = text[:8000],
+                )
+                return result.embeddings[0].values
+            except Exception as e:
+                if attempt == max_retries - 1:
+                    # Out of retries — let the caller (ingest_pdf) handle this
+                    raise
+                wait = 2 ** attempt  # 1s, 2s, 4s, 8s
+                print(f"[RAG] Embedding call failed (attempt {attempt+1}/{max_retries}): {e}. Retrying in {wait}s...")
+                time.sleep(wait)
 
     def embed_documents(self, texts: list[str]) -> list[list[float]]:
         embeddings = []
@@ -259,6 +311,27 @@ def ingest_pdf(file_path: str, session_id: str) -> dict:
 
     from pypdf import PdfReader
 
+    doc_hash = compute_file_hash(file_path)
+    collection_name = f"doc_{doc_hash}"
+
+    if _collection_exists(doc_hash) and _meta_path(doc_hash).exists():
+        print(f"[RAG] Cache HIT — doc_hash={doc_hash}, skipping embedding")
+        meta = _load_meta(doc_hash)
+        try:
+            Path(file_path).unlink(missing_ok=True)
+        except Exception:
+            pass
+        return {
+            "session_id":    session_id,
+            "collection_id": doc_hash,
+            "filename":      Path(file_path).name,
+            "page_count":    meta["page_count"],
+            "chunk_count":   meta["chunk_count"],
+            "cached":        True,
+        }
+
+    print(f"[RAG] Cache MISS — doc_hash={doc_hash}, embedding now")
+
     reader     = PdfReader(file_path)
     pages      = reader.pages
     page_count = len(pages)
@@ -300,7 +373,7 @@ def ingest_pdf(file_path: str, session_id: str) -> dict:
         Chroma.from_documents(
             documents         = batch,
             embedding         = _get_embeddings(),
-            collection_name   = f"session_{session_id}",
+            collection_name   = collection_name,
             persist_directory = str(CHROMA_DIR),
         )
         del batch
@@ -315,15 +388,54 @@ def ingest_pdf(file_path: str, session_id: str) -> dict:
     except Exception as e:
         print(f"[RAG] Could not delete temp file: {e}")
 
+
+    _save_meta(doc_hash, {"page_count": page_count, "chunk_count": chunk_count})
+
     return {
-        "session_id":  session_id,
-        "filename":    filename,
-        "page_count":  page_count,
-        "chunk_count": chunk_count,
+        "session_id":    session_id,
+        "collection_id": doc_hash,
+        "filename":      filename,
+        "page_count":    page_count,
+        "chunk_count":   chunk_count,
+        "cached":        False,
     }
 
 
 # ── Reranker ──────────────────────────────────────────────────────────────────
+
+
+COHERE_API_KEY = os.getenv("COHERE_API_KEY", "")
+
+def _cohere_rerank(question: str, docs_with_scores: list[tuple], top_n: int = TOP_K_FINAL) -> list[tuple]:
+    """Rerank candidate chunks using Cohere's cross-encoder rerank API.
+    Falls back to the heuristic _rerank() if Cohere is unavailable or errors."""
+    if not COHERE_API_KEY:
+        print("[RAG] No COHERE_API_KEY — using heuristic reranker")
+        return _rerank(question, docs_with_scores, top_n)
+
+    try:
+        import cohere
+        co = cohere.ClientV2(api_key=COHERE_API_KEY)
+
+        docs_text = [d.page_content for d, _ in docs_with_scores]
+
+        result = co.rerank(
+            model="rerank-v3.5",
+            query=question,
+            documents=docs_text,
+            top_n=top_n,
+        )
+
+        reranked = [
+            (docs_with_scores[r.index][0], r.relevance_score)
+            for r in result.results
+        ]
+        return reranked
+
+    except Exception as e:
+        print(f"[RAG] Cohere rerank failed ({e}) — falling back to heuristic")
+        return _rerank(question, docs_with_scores, top_n)
+
 
 def _rerank(question: str, docs_with_scores: list[tuple], top_n: int = TOP_K_FINAL) -> list[tuple]:
     q_tokens = set(re.sub(r"[^\w\s]", "", question.lower()).split())
@@ -352,7 +464,7 @@ def chat_with_pdf(session_id: str, question: str, history: list[tuple[str, str]]
         return
 
     vectorstore = Chroma(
-        collection_name    = f"session_{session_id}",
+        collection_name    = f"doc_{session_id}",
         embedding_function = _get_embeddings(),
         persist_directory  = str(CHROMA_DIR),
     )
@@ -365,7 +477,7 @@ def chat_with_pdf(session_id: str, question: str, history: list[tuple[str, str]]
         yield f'Could not find content for "{question}".\nDocument covers: {", ".join(sections)}.'
         return
 
-    context = _build_context(_rerank(question, filtered))
+    context = _build_context(_cohere_rerank(question, filtered))
     del raw, filtered
     gc.collect()
 
@@ -385,14 +497,14 @@ def get_top_sources(session_id: str, question: str) -> list[dict]:
     if LOW_MEMORY_MODE:
         return []
     vectorstore = Chroma(
-        collection_name    = f"session_{session_id}",
+        collection_name    = f"doc_{session_id}",
         embedding_function = _get_embeddings(),
         persist_directory  = str(CHROMA_DIR),
     )
     raw      = vectorstore.similarity_search_with_relevance_scores(question, k=TOP_K_RETRIEVE)
     result   = [
         {"section": d.metadata.get("section_name","?"), "snippet": d.page_content[:200].strip(), "score": round(s,3), "passed_threshold": s >= MIN_SCORE}
-        for d, s in _rerank(question, raw)
+        for d, s in _cohere_rerank(question, raw)
     ]
     del raw
     gc.collect()
@@ -404,7 +516,7 @@ def get_top_sources(session_id: str, question: str) -> list[dict]:
 def delete_session(session_id: str) -> None:
     try:
         Chroma(
-            collection_name    = f"session_{session_id}",
+            collection_name    = f"doc_{session_id}",
             embedding_function = _get_embeddings(),
             persist_directory  = str(CHROMA_DIR),
         ).delete_collection()

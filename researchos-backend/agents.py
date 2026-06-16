@@ -242,6 +242,54 @@ def build_writer_chain(llm: ChatGroq | None = None):
     return _WRITER_PROMPT | llm | StrOutputParser()
 
 
+
+_WRITER_REVISION_PROMPT = ChatPromptTemplate.from_messages([
+    (
+        "system",
+        "You are an expert research writer revising a report based on a critic's feedback. "
+        "Write clear, structured, detailed, insightful, and fully factual research reports in Markdown.",
+    ),
+    (
+        "human",
+        """Revise the research report below to address the critic's feedback below,
+especially every point listed under "Areas to Improve".
+
+Topic:
+{topic}
+
+Research Gathered:
+{research}
+
+Previous Draft:
+{previous_report}
+
+Critic Feedback:
+{feedback}
+
+Structure the revised report with these exact Markdown headings:
+
+## Introduction
+## Key Findings
+## Conclusion
+## Sources
+
+Rules:
+- Directly address each "Areas to Improve" point from the feedback
+- Minimum 3 detailed Key Findings with sub-points
+- Be factual and professional
+- Avoid repetition
+- List all source URLs under ## Sources as markdown links
+""",
+    ),
+])
+
+
+def build_writer_revision_chain(llm: ChatGroq | None = None):
+    if llm is None:
+        llm = get_chain_llm()
+    return _WRITER_REVISION_PROMPT | llm | StrOutputParser()
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Critic Chain
 # ─────────────────────────────────────────────────────────────────────────────
