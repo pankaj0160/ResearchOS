@@ -1,0 +1,23 @@
+# render.yaml — Render deployment configuration for ResearchOS
+# Place this at the repository root.
+
+services:
+  - type: web
+    name: researchos-backend
+    runtime: python
+    rootDir: researchos-backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.0
+      - key: RENDER
+        value: "true"
+      - key: RENDER_LOW_MEMORY
+        value: "true"
+      # All secrets below are set in Render dashboard — NOT here
+      # GROQ_API_KEYS, TAVILY_API_KEYS, GOOGLE_API_KEY,
+      # COHERE_API_KEY, DATABASE_URL, JWT_SECRET_KEY,
+      # LANGCHAIN_TRACING_V2, LANGCHAIN_API_KEY, LANGCHAIN_PROJECT,
+      # FRONTEND_ORIGIN
+    healthCheckPath: /api/health

@@ -38,6 +38,7 @@ Routes:
 from __future__ import annotations
 
 from auth import decode_token
+from rate_limit import research_limiter, upload_limiter
 import json
 import gc      
 import os
@@ -298,12 +299,48 @@ async def delete_run_route(run_id: int, current_user: CurrentUser):
     return {"deleted": True}
 
 
+
+@app.get("/api/history/{run_id}/export")
+async def export_run(run_id: int, current_user: CurrentUser):
+    """Download a past research run as a Markdown file."""
+    from fastapi.responses import Response
+    import re
+
+    run = get_run(run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail="Run not found.")
+    if run.get("user_id") != current_user["id"]:
+        raise HTTPException(status_code=403, detail="Access denied.")
+    if not run.get("report", "").strip():
+        raise HTTPException(status_code=422, detail="This run has no report content to export.")
+
+    topic    = run.get("topic", "research")
+    report   = run.get("report", "").strip()
+    feedback = run.get("feedback", "").strip()
+
+    content = f"# {topic}\n\n{report}"
+    if feedback:
+        content += f"\n\n---\n\n## Critic Review\n\n{feedback}"
+
+    slug     = re.sub(r"[^a-z0-9]+", "-", topic.lower()).strip("-") or "report"
+    filename = f"researchos-{slug}.md"
+
+    return Response(
+        content    = content.encode("utf-8"),
+        media_type = "text/markdown",
+        headers    = {"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
 # ── Research SSE Stream ───────────────────────────────────────────────────────
 @app.get("/api/research/stream")
 async def research_stream(
     topic: str = Query(..., min_length=3, max_length=300),
     current_user: CurrentUser = None,
 ):
+    # ── Rate limit: 5 research runs per 60 seconds per user ───────────────
+    research_limiter.check(current_user["id"])
+
     user_id = current_user["id"]
 
     async def event_stream():
@@ -451,6 +488,9 @@ async def rag_upload(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Only PDF files are supported. Please upload a .pdf file.",
         )
+    
+    # ── Rate limit: 10 uploads per 5 minutes per user ─────────────────────
+    upload_limiter.check(current_user["id"])
 
     # 2. Generate session ID and save file to disk
     session_id    = str(uuid4())

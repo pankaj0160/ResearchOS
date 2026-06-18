@@ -1,5 +1,7 @@
 import os
 from dotenv import load_dotenv
+import itertools
+
 
 from langchain_groq import ChatGroq
 from langchain_core.prompts import ChatPromptTemplate
@@ -15,9 +17,9 @@ load_dotenv(Path(__file__).parent / ".env", override=True)
 # ─────────────────────────────────────────────────────────────────────────────
 
 TOOL_USE_MODELS: list[str] = [
-    "llama-3.3-70b-versatile",          # Primary
-    "llama3-70b-8192",                  # Fallback 1
-    "llama-3.1-8b-instant",             # Fallback 2
+    "llama-3.3-70b-versatile",   # Primary
+    "moonshotai/kimi-k2-instruct",   # Fallback 1
+    "llama-3.1-8b-instant",      # Fallback 2 (500k TPD — almost never rate-limited)
 ]
 
 # Overridable via .env — set GROQ_CHAIN_MODEL=llama-3.1-8b-instant in .env
@@ -38,6 +40,7 @@ def _load_keys(env_var: str) -> list[str]:
 
 
 GROQ_KEYS: list[str] = _load_keys("GROQ_API_KEYS")
+_groq_key_cycle = itertools.cycle(GROQ_KEYS) if GROQ_KEYS else iter([])
 
 
 def _make_llm(model: str, temperature: float = 0) -> ChatGroq:
@@ -46,7 +49,7 @@ def _make_llm(model: str, temperature: float = 0) -> ChatGroq:
             "GROQ_API_KEYS is not set. "
             "Add it to backend/.env:\n  GROQ_API_KEYS=gsk_key1,gsk_key2"
         )
-    key = GROQ_KEYS[0]
+    key = next(_groq_key_cycle)
     print(f"[Groq] ✓  model={model}  key={key[:12]}…")
     return ChatGroq(api_key=key, model=model, temperature=temperature)
 
@@ -95,13 +98,47 @@ def get_chain_llm(temperature: float = 0) -> ChatGroq:
 # ─────────────────────────────────────────────────────────────────────────────
 # Core: manual bind_tools loop
 # ─────────────────────────────────────────────────────────────────────────────
-
 def _run_tool_loop(
     llm: ChatGroq,
     tools: list,
     user_message: str,
     max_iterations: int = MAX_TOOL_ITERATIONS,
 ) -> str:
+    from groq import RateLimitError, BadRequestError
+
+    current_model = llm.model_name
+    models_to_try = [current_model] + [m for m in TOOL_USE_MODELS if m != current_model]
+    combos = [(key, model) for model in models_to_try for key in GROQ_KEYS]
+
+    last_err: Exception | None = None
+
+    for attempt, (key, model) in enumerate(combos):
+        try:
+            current_llm = ChatGroq(api_key=key, model=model, temperature=llm.temperature)
+            print(f"[Groq] Trying model={model}  key={key[:12]}… (attempt {attempt+1}/{len(combos)})")
+            return _run_tool_loop_inner(current_llm, tools, user_message, max_iterations)
+        except RateLimitError as exc:
+            print(f"[Groq] 429 — model={model} key={key[:12]}… exhausted, trying next combo")
+            last_err = exc
+            continue
+        except BadRequestError as exc:
+            print(f"[Groq] 400 — model={model} decommissioned or bad request, skipping")
+            last_err = exc
+            continue
+
+    raise RuntimeError(
+        f"All {len(combos)} key+model combos failed. "
+        f"Last error: {last_err}"
+    ) from last_err
+
+
+def _run_tool_loop_inner(
+    llm: ChatGroq,
+    tools: list,
+    user_message: str,
+    max_iterations: int = MAX_TOOL_ITERATIONS,
+) -> str:
+    """Core tool loop — no retry logic."""
     tool_map: dict[str, object] = {t.name: t for t in tools}
     llm_with_tools = llm.bind_tools(tools)
     messages: list = [HumanMessage(content=user_message)]
