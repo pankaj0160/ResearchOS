@@ -74,6 +74,9 @@ export const ragApi = {
       body: JSON.stringify({ session_id: sessionId, question }),
     })
 
+
+    
+
     if (!res.ok) {
       const err = await res.json().catch(() => ({}))
       onError?.(err?.detail ?? `Chat request failed (${res.status})`)
@@ -104,4 +107,35 @@ export const ragApi = {
       }
     }
   },
+
+
+  // Poll status until ready or error
+  async pollStatus(sessionId, onProgress) {
+  const maxAttempts = 60   // 60 × 2s = 2 minutes max
+  let attempts = 0
+
+  while (attempts < maxAttempts) {
+    await new Promise(r => setTimeout(r, 2000))
+
+    const token = localStorage.getItem('researchos_token')
+    const res = await fetch(`${BASE}/api/rag/status/${sessionId}`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    })
+
+    if (!res.ok) throw new Error('Status check failed')
+
+    const data = await res.json()
+
+    if (data.status === 'ready') return data
+    if (data.status === 'error') throw new Error(data.error || 'Processing failed')
+
+    attempts++
+    if (onProgress) {
+      const pct = Math.min(10 + (attempts / maxAttempts) * 80, 90)
+      onProgress(Math.round(pct))
+    }
+  }
+
+  throw new Error('Processing timed out. Please try again.')
+},
 }

@@ -35,13 +35,22 @@ export function usePDFChat() {
   const uploadFile = useCallback(async (file) => {
     setUploadError('')
     setUploading(true)
-    setUploadProgress(0)
+    setUploadProgress(5)  // show immediate feedback
 
     try {
+      // Step 1: upload the file — returns immediately with status="processing"
       const meta = await ragApi.upload(file, pct => setUploadProgress(pct))
-      setSession(meta)
-      setMessages([])   // clear previous chat for new doc
-      return meta
+
+      // Step 2: poll until ingestion is done
+      setUploadProgress(10)
+      const ready = await ragApi.pollStatus(meta.session_id, pct => setUploadProgress(pct))
+
+      // Step 3: session is ready — set it with full metadata
+      setUploadProgress(100)
+      setSession(ready)
+      setMessages([])
+      return ready
+
     } catch (err) {
       setUploadError(err.message)
       return null

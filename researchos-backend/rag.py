@@ -35,13 +35,12 @@ GOOGLE_API_KEY  = os.getenv("GOOGLE_API_KEY", "")
 CHROMA_DIR        = Path(__file__).parent / "chroma_store"
 MAX_SECTION_CHARS = 1000
 SECTION_OVERLAP   = 100
-TOP_K_RETRIEVE    = 20
-TOP_K_FINAL       = 5
-MIN_SCORE         = 0.25
+TOP_K_RETRIEVE    = 30
+TOP_K_FINAL       = 8
+MIN_SCORE         = 0.15
 MAX_HISTORY       = 3
 
 CHROMA_DIR.mkdir(exist_ok=True)
-
 
 
 def compute_file_hash(file_path: str) -> str:
@@ -73,14 +72,47 @@ def _collection_exists(doc_hash: str) -> bool:
     return f"doc_{doc_hash}" in names
 
 
-_SYSTEM_PROMPT = """You are a precise document assistant.
-Answer ONLY from the document chunks provided. Never use outside knowledge.
+# ── Session → doc_hash mapping ────────────────────────────────────────────────
+# This is the fix: we keep a persistent session_id → doc_hash lookup so that
+# chat_with_pdf / get_top_sources can find the right Chroma collection.
+# The cache hit/miss logic based on doc_hash is completely unchanged.
 
-RULES:
-1. Cite every claim inline as [Chunk N].
-2. Use ALL relevant chunks — do not stop after the first one.
-3. If the answer is not in the chunks, say: "This is not in the document."
-4. Never invent information.
+_SESSION_MAP_PATH = CHROMA_DIR / "session_map.json"
+
+
+def _load_session_map() -> dict:
+    if _SESSION_MAP_PATH.exists():
+        return json.loads(_SESSION_MAP_PATH.read_text())
+    return {}
+
+
+def _save_session_map(m: dict) -> None:
+    _SESSION_MAP_PATH.write_text(json.dumps(m))
+
+
+def _register_session(session_id: str, doc_hash: str) -> None:
+    """Link a session_id to the doc_hash collection it should query."""
+    m = _load_session_map()
+    m[session_id] = doc_hash
+    _save_session_map(m)
+
+
+def _get_collection_for_session(session_id: str) -> str | None:
+    """Return the doc_hash for a session, or None if not found."""
+    return _load_session_map().get(session_id)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+
+_SYSTEM_PROMPT = """You are a document assistant. Answer ONLY using the chunks below.
+
+STRICT RULES:
+1. Every sentence MUST be directly supported by a chunk. Cite it as [Chunk N].
+2. If the chunks do not contain enough information, write exactly:
+   "The document does not fully cover this. Based on [Chunk N]: ..."
+3. DO NOT add examples, analogies, or context not present in the chunks.
+4. DO NOT use knowledge from your training data.
+
 
 FORMATTING (use Markdown):
 - If the answer is a list of items (problems, findings, dates, steps, names, etc.),
@@ -176,9 +208,8 @@ class GeminiEmbeddings(Embeddings):
                 return result.embeddings[0].values
             except Exception as e:
                 if attempt == max_retries - 1:
-                    # Out of retries — let the caller (ingest_pdf) handle this
                     raise
-                wait = 2 ** attempt  # 1s, 2s, 4s, 8s
+                wait = 2 ** attempt
                 print(f"[RAG] Embedding call failed (attempt {attempt+1}/{max_retries}): {e}. Retrying in {wait}s...")
                 time.sleep(wait)
 
@@ -314,6 +345,7 @@ def ingest_pdf(file_path: str, session_id: str) -> dict:
     doc_hash = compute_file_hash(file_path)
     collection_name = f"doc_{doc_hash}"
 
+    # ── CACHE HIT — same PDF was uploaded before, skip re-embedding ──────────
     if _collection_exists(doc_hash) and _meta_path(doc_hash).exists():
         print(f"[RAG] Cache HIT — doc_hash={doc_hash}, skipping embedding")
         meta = _load_meta(doc_hash)
@@ -321,6 +353,10 @@ def ingest_pdf(file_path: str, session_id: str) -> dict:
             Path(file_path).unlink(missing_ok=True)
         except Exception:
             pass
+
+        # FIX: register this session_id → doc_hash so lookups work
+        _register_session(session_id, doc_hash)
+
         return {
             "session_id":    session_id,
             "collection_id": doc_hash,
@@ -330,6 +366,7 @@ def ingest_pdf(file_path: str, session_id: str) -> dict:
             "cached":        True,
         }
 
+    # ── CACHE MISS — new PDF, embed and store ─────────────────────────────────
     print(f"[RAG] Cache MISS — doc_hash={doc_hash}, embedding now")
 
     reader     = PdfReader(file_path)
@@ -388,8 +425,10 @@ def ingest_pdf(file_path: str, session_id: str) -> dict:
     except Exception as e:
         print(f"[RAG] Could not delete temp file: {e}")
 
-
     _save_meta(doc_hash, {"page_count": page_count, "chunk_count": chunk_count})
+
+    # FIX: register this session_id → doc_hash so lookups work
+    _register_session(session_id, doc_hash)
 
     return {
         "session_id":    session_id,
@@ -403,27 +442,37 @@ def ingest_pdf(file_path: str, session_id: str) -> dict:
 
 # ── Reranker ──────────────────────────────────────────────────────────────────
 
-
 COHERE_API_KEY = os.getenv("COHERE_API_KEY", "")
-
 def _cohere_rerank(question: str, docs_with_scores: list[tuple], top_n: int = TOP_K_FINAL) -> list[tuple]:
     """Rerank candidate chunks using Cohere's cross-encoder rerank API.
-    Falls back to the heuristic _rerank() if Cohere is unavailable or errors."""
+    Falls back to the heuristic _rerank() if Cohere is unavailable or errors.
+
+    Supports both cohere SDK v4 (Client) and v5 (ClientV2).
+    """
     if not COHERE_API_KEY:
         print("[RAG] No COHERE_API_KEY — using heuristic reranker")
         return _rerank(question, docs_with_scores, top_n)
 
     try:
         import cohere
-        co = cohere.ClientV2(api_key=COHERE_API_KEY)
+
+        # ── SDK version detection ─────────────────────────────────────────────
+        # cohere v5+ exposes ClientV2; v4 only has Client.
+        # We try v5 first (recommended), fall back to v4.
+        try:
+            co = cohere.ClientV2(api_key=COHERE_API_KEY)
+        except AttributeError:
+            co = cohere.Client(api_key=COHERE_API_KEY)   # cohere v4
 
         docs_text = [d.page_content for d, _ in docs_with_scores]
+        if not docs_text:
+            return _rerank(question, docs_with_scores, top_n)
 
         result = co.rerank(
             model="rerank-v3.5",
             query=question,
             documents=docs_text,
-            top_n=top_n,
+            top_n=min(top_n, len(docs_text)),   # top_n must not exceed len(docs)
         )
 
         reranked = [
@@ -435,7 +484,7 @@ def _cohere_rerank(question: str, docs_with_scores: list[tuple], top_n: int = TO
     except Exception as e:
         print(f"[RAG] Cohere rerank failed ({e}) — falling back to heuristic")
         return _rerank(question, docs_with_scores, top_n)
-
+    
 
 def _rerank(question: str, docs_with_scores: list[tuple], top_n: int = TOP_K_FINAL) -> list[tuple]:
     q_tokens = set(re.sub(r"[^\w\s]", "", question.lower()).split())
@@ -463,8 +512,14 @@ def chat_with_pdf(session_id: str, question: str, history: list[tuple[str, str]]
         yield "PDF Chat is currently unavailable on this deployment."
         return
 
+    # FIX: resolve the actual collection name from the session_id
+    doc_hash = _get_collection_for_session(session_id)
+    if not doc_hash:
+        yield f"Session '{session_id}' not found. Please re-upload your PDF."
+        return
+
     vectorstore = Chroma(
-        collection_name    = f"doc_{session_id}",
+        collection_name    = f"doc_{doc_hash}",
         embedding_function = _get_embeddings(),
         persist_directory  = str(CHROMA_DIR),
     )
@@ -496,8 +551,15 @@ def chat_with_pdf(session_id: str, question: str, history: list[tuple[str, str]]
 def get_top_sources(session_id: str, question: str) -> list[dict]:
     if LOW_MEMORY_MODE:
         return []
+
+    # FIX: resolve the actual collection name from the session_id
+    doc_hash = _get_collection_for_session(session_id)
+    if not doc_hash:
+        print(f"[RAG] get_top_sources: no collection found for session_id={session_id}")
+        return []
+
     vectorstore = Chroma(
-        collection_name    = f"doc_{session_id}",
+        collection_name    = f"doc_{doc_hash}",
         embedding_function = _get_embeddings(),
         persist_directory  = str(CHROMA_DIR),
     )
@@ -514,12 +576,21 @@ def get_top_sources(session_id: str, question: str) -> list[dict]:
 # ── Cleanup ───────────────────────────────────────────────────────────────────
 
 def delete_session(session_id: str) -> None:
+    # FIX: resolve the actual collection name from the session_id
+    doc_hash = _get_collection_for_session(session_id)
+    if not doc_hash:
+        print(f"[RAG] delete_session: no collection found for session_id={session_id}")
+        return
     try:
         Chroma(
-            collection_name    = f"doc_{session_id}",
+            collection_name    = f"doc_{doc_hash}",
             embedding_function = _get_embeddings(),
             persist_directory  = str(CHROMA_DIR),
         ).delete_collection()
+        # Remove from session map
+        m = _load_session_map()
+        m.pop(session_id, None)
+        _save_session_map(m)
         gc.collect()
     except Exception as e:
         print(f"[RAG] cleanup warning: {e}")

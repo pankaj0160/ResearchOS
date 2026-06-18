@@ -63,6 +63,15 @@ from pathlib import Path
 from fastapi import UploadFile, File
 from uuid import uuid4
 from datetime import datetime
+from fastapi import (
+    BackgroundTasks,   # ← add this
+    Depends,
+    FastAPI,
+    File,
+    HTTPException,
+    UploadFile,
+    status,
+)
 
 load_dotenv(Path(__file__).parent / ".env", override=True)
 
@@ -357,7 +366,8 @@ from rag import (
     delete_session,
 )
 
-# In-memory session store: session_id → {user_id, filename, created_at, history}
+# In-memory session store: session_id → {user_id, filename, created_at, history, status, error}
+# status values: "processing" | "ready" | "error"
 _rag_sessions: dict[str, dict] = {}
 
 
@@ -366,17 +376,74 @@ class RagChatRequest(BaseModel):
     question: str
 
 
+
+async def _run_ingestion(session_id: str, file_path: str) -> None:
+    """
+    Runs ingest_pdf() in a thread pool so it doesn't block the event loop.
+    Updates _rag_sessions[session_id] with status='ready' or status='error' when done.
+    """
+    import asyncio
+
+    loop = asyncio.get_event_loop()
+
+    try:
+        # run_in_executor runs a blocking function in a separate thread
+        # This is the correct way to run sync code inside async FastAPI
+        ingest_result = await loop.run_in_executor(
+            None,  # None = use default ThreadPoolExecutor
+            lambda: ingest_pdf(str(file_path), session_id=session_id)
+        )
+
+        page_count  = ingest_result.get("page_count",  0) if isinstance(ingest_result, dict) else 0
+        chunk_count = ingest_result.get("chunk_count", 0) if isinstance(ingest_result, dict) else 0
+
+        # Update session with results
+        if session_id in _rag_sessions:
+            _rag_sessions[session_id].update({
+                "status":      "ready",
+                "page_count":  page_count,
+                "chunk_count": chunk_count,
+            })
+        print(f"[Ingestion] session={session_id} ready — {page_count} pages, {chunk_count} chunks")
+
+    except ValueError as exc:
+        # e.g. "PDF has no extractable text"
+        print(f"[Ingestion] session={session_id} failed (ValueError): {exc}")
+        if session_id in _rag_sessions:
+            _rag_sessions[session_id].update({
+                "status": "error",
+                "error":  str(exc),
+            })
+        try:
+            Path(file_path).unlink(missing_ok=True)
+        except Exception:
+            pass
+
+    except Exception as exc:
+        print(f"[Ingestion] session={session_id} failed: {exc}")
+        if session_id in _rag_sessions:
+            _rag_sessions[session_id].update({
+                "status": "error",
+                "error":  f"Processing failed: {exc}",
+            })
+        try:
+            Path(file_path).unlink(missing_ok=True)
+        except Exception:
+            pass
+
+    finally:
+        gc.collect()
+
 @app.post("/api/rag/upload", tags=["RAG"])
 async def rag_upload(
+    background_tasks: BackgroundTasks,
     current_user: CurrentUser,
     file: UploadFile = File(...),
 ):
     """
-    Accept a PDF upload, ingest it into the vector store, and return session metadata.
-
-    Flow:
-      Receive PDF → validate → generate session_id → save to disk
-      → call ingest_pdf() → store metadata in _rag_sessions → return metadata
+    Accept a PDF upload and return immediately with status='processing'.
+    Ingestion (chunking + embedding) runs in the background.
+    Poll /api/rag/status/{session_id} to know when it's ready.
     """
     # 1. Validate file type
     if not file.filename or not file.filename.lower().endswith(".pdf"):
@@ -385,12 +452,11 @@ async def rag_upload(
             detail="Only PDF files are supported. Please upload a .pdf file.",
         )
 
-    # 2. Generate a unique session ID and destination path
-    session_id = str(uuid4())
+    # 2. Generate session ID and save file to disk
+    session_id    = str(uuid4())
     safe_filename = f"{session_id}_{file.filename}"
-    file_path = UPLOAD_DIR / safe_filename
+    file_path     = UPLOAD_DIR / safe_filename
 
-    # 3. Stream file to disk
     try:
         contents = await file.read()
         if not contents:
@@ -407,49 +473,67 @@ async def rag_upload(
             detail=f"Failed to save uploaded file: {exc}",
         )
 
-    # 4. Ingest the PDF into the vector store
-    try:
-        ingest_result = ingest_pdf(str(file_path), session_id=session_id)
-    except ValueError as exc:
-        # e.g. "PDF has no extractable text"
-        file_path.unlink(missing_ok=True)
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=str(exc),
-        )
-    except Exception as exc:
-        file_path.unlink(missing_ok=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to process PDF: {exc}",
-        )
-
-    # 5. Store session metadata
+    # 3. Register session immediately with status="processing"
     created_at = datetime.utcnow().isoformat()
     _rag_sessions[session_id] = {
-        "user_id":       current_user["id"],
-        "filename":      file.filename,
-        "file_path":     str(file_path),
-        "collection_id": ingest_result.get("collection_id", session_id),
-        "created_at":    created_at,
-        "history":       [],
+        "user_id":     current_user["id"],
+        "filename":    file.filename,
+        "file_path":   str(file_path),
+        "created_at":  created_at,
+        "history":     [],
+        "status":      "processing",   # ← new field
+        "page_count":  0,
+        "chunk_count": 0,
+        "error":       None,
     }
 
-    # ingest_pdf should return a dict with at least page_count and chunk_count.
-    # If it returns something else, we handle both cases gracefully.
-    page_count  = ingest_result.get("page_count",  0) if isinstance(ingest_result, dict) else 0
-    chunk_count = ingest_result.get("chunk_count", 0) if isinstance(ingest_result, dict) else 0
+    # 4. Schedule ingestion to run AFTER this response is sent
+    background_tasks.add_task(_run_ingestion, session_id, str(file_path))
 
-    gc.collect()
- 
+    # 5. Return immediately — don't wait for ingestion
+    return {
+        "session_id": session_id,
+        "filename":   file.filename,
+        "status":     "processing",
+        "created_at": created_at,
+    }
+
+
+
+@app.get("/api/rag/status/{session_id}", tags=["RAG"])
+async def rag_status(session_id: str, current_user: CurrentUser):
+    """
+    Poll this endpoint after upload to check if ingestion is complete.
+
+    Returns:
+      status: "processing" | "ready" | "error"
+      page_count, chunk_count: populated when status="ready"
+      error: populated when status="error"
+    """
+    session = _rag_sessions.get(session_id)
+
+    if not session:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Session not found.",
+        )
+
+    if session["user_id"] != current_user["id"]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied.",
+        )
+
     return {
         "session_id":  session_id,
-        "filename":    file.filename,
-        "page_count":  page_count,
-        "chunk_count": chunk_count,
-        "created_at":  created_at,
-        "cached":      ingest_result.get("cached", False),
+        "filename":    session.get("filename"),
+        "status":      session.get("status", "processing"),
+        "page_count":  session.get("page_count", 0),
+        "chunk_count": session.get("chunk_count", 0),
+        "error":       session.get("error"),
+        "created_at":  session.get("created_at"),
     }
+
 
 
 @app.get("/api/rag/sessions", tags=["RAG"])
@@ -487,6 +571,17 @@ async def rag_chat(body: RagChatRequest, current_user: CurrentUser):
     # 2. Ownership check
     if session["user_id"] != current_user["id"]:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+    
+    if session.get("status") == "processing":
+        raise HTTPException(
+            status_code=status.HTTP_425_TOO_EARLY,
+            detail="Document is still being processed. Please wait.",
+        )
+    if session.get("status") == "error":
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=session.get("error", "Document processing failed."),
+        )
 
     # 3. Validate question
     question = body.question.strip()
@@ -495,15 +590,14 @@ async def rag_chat(body: RagChatRequest, current_user: CurrentUser):
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="Question cannot be empty.",
         )
-    
-    collection_id = session.get("collection_id", body.session_id)
+
 
     def event_stream():
         full_answer = ""
         try:
             # 4. Retrieve relevant source chunks
             try:
-                sources = get_top_sources(collection_id, question)
+                sources = get_top_sources(body.session_id, question)
             except Exception:
                 sources = []
 
@@ -511,7 +605,7 @@ async def rag_chat(body: RagChatRequest, current_user: CurrentUser):
             yield f"data: {json.dumps({'type': 'sources', 'sources': sources})}\n\n"
 
             # 5. Stream the answer token-by-token (pass history for multi-turn context)
-            for chunk in chat_with_pdf(collection_id, question, session.get("history", [])):
+            for chunk in chat_with_pdf(body.session_id, question, session.get("history", [])):
                 full_answer += chunk
                 yield f"data: {json.dumps({'type': 'chunk', 'chunk': chunk})}\n\n"
 

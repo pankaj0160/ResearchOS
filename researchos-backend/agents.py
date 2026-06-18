@@ -20,7 +20,10 @@ TOOL_USE_MODELS: list[str] = [
     "llama-3.1-8b-instant",             # Fallback 2
 ]
 
-CHAIN_MODEL = "llama-3.3-70b-versatile"
+# Overridable via .env — set GROQ_CHAIN_MODEL=llama-3.1-8b-instant in .env
+# before running evaluate.py to avoid burning your 100k/day quota on Step 1.
+# Leave unset (or set to llama-3.3-70b-versatile) for normal app usage.
+CHAIN_MODEL = os.getenv("GROQ_CHAIN_MODEL", "llama-3.3-70b-versatile")
 
 MAX_TOOL_ITERATIONS = 6
 
@@ -38,41 +41,21 @@ GROQ_KEYS: list[str] = _load_keys("GROQ_API_KEYS")
 
 
 def _make_llm(model: str, temperature: float = 0) -> ChatGroq:
-    """
-    Return a ChatGroq instance for the given model WITHOUT a validation ping.
-
-    Why no ping:
-      The original code called llm.invoke("ping") to validate each key.
-      This is a blocking Groq API round-trip that runs on the asyncio thread
-      pool — two pings (tool_llm + chain_llm) add ~2-4s of blocking I/O
-      before the pipeline even starts, and can cause the SSE stream to appear
-      hung or drop the connection on slow networks.
-
-      Key validity is checked implicitly on the first real call. If a key
-      fails there, the error surfaces as an SSE error event to the frontend.
-    """
     if not GROQ_KEYS:
         raise RuntimeError(
             "GROQ_API_KEYS is not set. "
             "Add it to backend/.env:\n  GROQ_API_KEYS=gsk_key1,gsk_key2"
         )
-
-    # Use the first key — failover happens at the agent level via TOOL_USE_MODELS
     key = GROQ_KEYS[0]
     print(f"[Groq] ✓  model={model}  key={key[:12]}…")
     return ChatGroq(api_key=key, model=model, temperature=temperature)
 
 
 def _make_llm_with_failover(model: str, temperature: float = 0) -> ChatGroq:
-    """
-    Try every key for a given model. Falls back across keys on auth errors.
-    Used only when we need guaranteed key validation (e.g. after a 401).
-    """
     last_err: Exception | None = None
     for key in GROQ_KEYS:
         try:
             llm = ChatGroq(api_key=key, model=model, temperature=temperature)
-            # Lightweight validation — only used in explicit failover path
             llm.invoke("hi")
             print(f"[Groq] ✓  model={model}  key={key[:12]}…")
             return llm
@@ -87,10 +70,6 @@ def _make_llm_with_failover(model: str, temperature: float = 0) -> ChatGroq:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def get_tool_llm(temperature: float = 0) -> ChatGroq:
-    """
-    Return the best available LLM for tool-using agents.
-    Iterates TOOL_USE_MODELS until a working model is found.
-    """
     last_err: Exception | None = None
     for model in TOOL_USE_MODELS:
         try:
@@ -98,14 +77,18 @@ def get_tool_llm(temperature: float = 0) -> ChatGroq:
         except RuntimeError as exc:
             print(f"[Groq] model={model} unavailable: {exc}")
             last_err = exc
-
     raise RuntimeError(
         f"No working tool-LLM found. Tried: {TOOL_USE_MODELS}. Last: {last_err}"
     )
 
 
 def get_chain_llm(temperature: float = 0) -> ChatGroq:
-    """Return the LLM for writer/critic chains (no tool binding)."""
+    """Return the LLM for writer/critic chains (no tool binding).
+
+    Model is controlled by GROQ_CHAIN_MODEL env var (default: llama-3.3-70b-versatile).
+    Set GROQ_CHAIN_MODEL=llama-3.1-8b-instant in .env before running evaluate.py
+    to use a token-efficient model during RAG response collection.
+    """
     return _make_llm(CHAIN_MODEL, temperature)
 
 
@@ -240,7 +223,6 @@ def build_writer_chain(llm: ChatGroq | None = None):
     if llm is None:
         llm = get_chain_llm()
     return _WRITER_PROMPT | llm | StrOutputParser()
-
 
 
 _WRITER_REVISION_PROMPT = ChatPromptTemplate.from_messages([
