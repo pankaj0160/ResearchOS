@@ -16,8 +16,8 @@ from dotenv import load_dotenv
 load_dotenv(Path(__file__).parent / ".env", override=True)
 
 # DEBUG - remove after fixing
-print(f"[DEBUG] .env path: {Path(__file__).parent / '.env'}")
-print(f"[DEBUG] TAVILY_API_KEYS raw: {os.getenv('TAVILY_API_KEYS', 'NOT FOUND')}")
+# print(f"[DEBUG] .env path: {Path(__file__).parent / '.env'}")
+# print(f"[DEBUG] TAVILY_API_KEYS raw: {os.getenv('TAVILY_API_KEYS', 'NOT FOUND')}")
 
 
 # ── Config ─────────────────────────────────────────────────────────────────────
