@@ -1,0 +1,1223 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ResearchOS — Day 2 Guide</title>
+<style>
+  :root {
+    --bg:#09090b;--bg2:#111113;--bg3:#18181b;--bg4:#1c1c1f;
+    --border:rgba(255,255,255,0.07);--border2:rgba(255,255,255,0.13);
+    --text:#fafafa;--muted:#a1a1aa;--faint:#52525b;
+    --accent:#14b8a6;--accent2:#22c55e;
+    --indigo:#6366f1;--purple:#a855f7;
+    --green:#22c55e;--amber:#f59e0b;--blue:#3b82f6;--red:#ef4444;--teal:#14b8a6;
+    --mono:'JetBrains Mono','Fira Code','Cascadia Code',monospace;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;}
+  html{scroll-behavior:smooth;}
+  body{background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,sans-serif;font-size:15px;line-height:1.7;}
+  .wrap{max-width:860px;margin:0 auto;padding:0 1.25rem 6rem;}
+
+  /* HERO */
+  .hero{padding:2.5rem 0 2rem;border-bottom:1px solid var(--border);margin-bottom:2rem;}
+  .hero-eyebrow{font-size:11px;font-weight:700;letter-spacing:.15em;text-transform:uppercase;color:var(--accent);margin-bottom:.75rem;}
+  .hero h1{font-size:clamp(1.7rem,4vw,2.6rem);font-weight:800;letter-spacing:-.04em;line-height:1.15;margin-bottom:.75rem;}
+  .hero h1 em{font-style:normal;background:linear-gradient(135deg,var(--teal),var(--green));-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;}
+  .hero p{color:var(--muted);max-width:640px;font-size:1rem;}
+  .pills{display:flex;gap:8px;flex-wrap:wrap;margin-top:1rem;}
+  .pill{font-size:12px;padding:3px 12px;border-radius:999px;background:var(--bg3);border:1px solid var(--border2);color:var(--muted);}
+  .pill b{color:var(--text);}
+
+  /* STEP NAV */
+  .stepnav{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:2rem;}
+  .stepnav a{text-decoration:none;font-size:12px;padding:5px 14px;border-radius:8px;background:var(--bg2);border:1px solid var(--border);color:var(--muted);transition:border-color .15s,color .15s;}
+  .stepnav a:hover{border-color:var(--accent);color:var(--text);}
+
+  /* STEP */
+  .step{margin-bottom:3.5rem;}
+  .step-header{display:flex;align-items:flex-start;gap:1rem;margin-bottom:1.25rem;}
+  .step-num{width:36px;height:36px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:800;flex-shrink:0;}
+  .s1 .step-num{background:rgba(20,184,166,.15);color:#2dd4bf;}
+  .s2 .step-num{background:rgba(99,102,241,.15);color:#818cf8;}
+  .s3 .step-num{background:rgba(34,197,94,.15);color:#4ade80;}
+  .s4 .step-num{background:rgba(245,158,11,.15);color:#fbbf24;}
+  .s5 .step-num{background:rgba(168,85,247,.15);color:#c084fc;}
+  .s6 .step-num{background:rgba(236,72,153,.15);color:#f472b6;}
+  .step-title{font-size:1.15rem;font-weight:700;letter-spacing:-.02em;line-height:1.3;}
+  .step-sub{font-size:13px;color:var(--muted);margin-top:3px;}
+
+  /* WHY BOX */
+  .why{background:rgba(20,184,166,.06);border:1px solid rgba(20,184,166,.2);border-radius:12px;padding:1rem 1.25rem;margin-bottom:1.25rem;}
+  .why-label{font-size:10px;font-weight:800;letter-spacing:.12em;text-transform:uppercase;color:#2dd4bf;margin-bottom:5px;}
+  .why p{font-size:13.5px;color:#99f6e4;line-height:1.65;}
+  .why p b{color:#ccfbf1;font-weight:600;}
+
+  /* CALLOUTS */
+  .note{border-radius:10px;padding:.875rem 1.1rem;margin:1rem 0;font-size:13.5px;line-height:1.65;display:flex;gap:10px;}
+  .note-icon{font-size:16px;flex-shrink:0;margin-top:1px;}
+  .note-green{background:rgba(34,197,94,.07);border:1px solid rgba(34,197,94,.2);color:#86efac;}
+  .note-amber{background:rgba(245,158,11,.07);border:1px solid rgba(245,158,11,.2);color:#fcd34d;}
+  .note-red{background:rgba(239,68,68,.07);border:1px solid rgba(239,68,68,.2);color:#fca5a5;}
+  .note-blue{background:rgba(59,130,246,.07);border:1px solid rgba(59,130,246,.2);color:#93c5fd;}
+  .note-indigo{background:rgba(99,102,241,.07);border:1px solid rgba(99,102,241,.2);color:#c7d2fe;}
+
+  /* WHERE */
+  .where{background:var(--bg3);border:1px solid var(--border2);border-radius:10px;padding:.8rem 1rem;margin-bottom:1rem;display:flex;align-items:center;gap:10px;}
+  .where-icon{font-size:18px;flex-shrink:0;}
+  .where-body{flex:1;}
+  .where-label{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:var(--faint);margin-bottom:3px;}
+  .where-path{font-family:var(--mono);font-size:13px;color:#a5b4fc;}
+  .where-desc{font-size:12px;color:var(--muted);margin-top:2px;}
+
+  /* CODE */
+  .code-wrap{margin:.75rem 0 1.5rem;}
+  .code-label{display:flex;align-items:center;gap:8px;margin-bottom:5px;flex-wrap:wrap;}
+  .code-label-text{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);}
+  .code-label-file{font-family:var(--mono);font-size:11px;background:var(--bg3);border:1px solid var(--border2);padding:2px 8px;border-radius:6px;color:#a5b4fc;}
+  .code-label-tag{font-size:10px;font-weight:700;padding:2px 8px;border-radius:6px;}
+  .tag-new{background:rgba(34,197,94,.12);color:#4ade80;border:1px solid rgba(34,197,94,.25);}
+  .tag-edit{background:rgba(245,158,11,.12);color:#fbbf24;border:1px solid rgba(245,158,11,.25);}
+  .tag-add{background:rgba(99,102,241,.12);color:#a5b4fc;border:1px solid rgba(99,102,241,.25);}
+  .code-block{background:#0d0d0f;border:1px solid rgba(255,255,255,.08);border-radius:12px;overflow-x:auto;}
+  .code-block pre{font-family:var(--mono);font-size:12.5px;line-height:1.8;color:#e4e4e7;padding:1.1rem 1.25rem;white-space:pre;}
+
+  /* syntax */
+  .kw{color:#c084fc;} .fn{color:#60a5fa;} .st{color:#4ade80;} .cm{color:#52525b;font-style:italic;} .nb{color:#fbbf24;} .op{color:#f472b6;}
+
+  code{font-family:var(--mono);font-size:12.5px;background:rgba(255,255,255,.07);padding:1px 6px;border-radius:5px;color:#a5b4fc;}
+
+  /* FLOW DIAGRAM */
+  .flow{background:var(--bg2);border:1px solid var(--border);border-radius:14px;padding:1.25rem 1.5rem;margin:1rem 0;}
+  .flow-title{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:var(--faint);margin-bottom:1rem;}
+  .flow-row{display:flex;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap;}
+  .flow-box{background:var(--bg3);border:1px solid var(--border2);border-radius:8px;padding:6px 12px;font-size:13px;font-weight:500;}
+  .flow-box.highlight{background:rgba(20,184,166,.1);border-color:rgba(20,184,166,.3);color:#2dd4bf;}
+  .flow-box.new{background:rgba(34,197,94,.1);border-color:rgba(34,197,94,.3);color:#4ade80;}
+  .flow-arrow{color:var(--faint);font-size:16px;}
+  .flow-note{font-size:12px;color:var(--muted);margin-top:4px;padding-left:4px;}
+
+  /* CHECKPOINT */
+  .checkpoint{background:rgba(34,197,94,.06);border:1px solid rgba(34,197,94,.2);border-radius:12px;padding:1.1rem 1.25rem;margin:2rem 0;}
+  .checkpoint-head{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:var(--green);margin-bottom:8px;}
+  .checkpoint ul{list-style:none;}
+  .checkpoint ul li{font-size:13.5px;color:#86efac;padding:4px 0;display:flex;gap:8px;}
+  .checkpoint ul li::before{content:"✓";font-weight:700;flex-shrink:0;}
+
+  /* SUMMARY TABLE */
+  table.summary{width:100%;border-collapse:collapse;font-size:13px;}
+  table.summary th{text-align:left;padding:8px 12px;background:var(--bg3);color:var(--faint);font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;border-bottom:1px solid var(--border);}
+  table.summary td{padding:8px 12px;border-bottom:1px solid var(--border);color:var(--muted);vertical-align:top;}
+  table.summary td:first-child{color:#a5b4fc;font-family:var(--mono);font-size:12px;}
+  table.summary tr:last-child td{border-bottom:none;}
+
+  hr{border:none;border-top:1px solid var(--border);margin:2.5rem 0;}
+  .section-label{font-size:11px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:var(--accent);margin-bottom:.5rem;}
+
+  /* CHECKLIST */
+  .checklist{list-style:none;margin:.75rem 0;}
+  .checklist li{padding:7px 0;font-size:13.5px;color:var(--muted);display:flex;gap:10px;border-bottom:1px solid var(--border);}
+  .checklist li:last-child{border-bottom:none;}
+  .checklist li::before{content:"□";color:var(--accent);font-size:14px;flex-shrink:0;margin-top:1px;}
+  .checklist li b{color:var(--text);}
+
+  /* DIFF BLOCK */
+  .diff{background:#0d0d0f;border:1px solid rgba(255,255,255,.08);border-radius:12px;overflow-x:auto;margin:.75rem 0 1.25rem;}
+  .diff pre{font-family:var(--mono);font-size:12.5px;line-height:1.8;padding:1.1rem 1.25rem;white-space:pre;}
+  .diff-del{color:#f87171;background:rgba(239,68,68,.08);}
+  .diff-add{color:#4ade80;background:rgba(34,197,94,.08);}
+  .diff-ctx{color:#52525b;}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<!-- HERO -->
+<div class="hero">
+  <div class="hero-eyebrow">ResearchOS · Day 2 of 7</div>
+  <h1>Backend<br><em>Cross-Feature Wires</em></h1>
+  <p>Today you make the features talk to each other for the first time. Research auto-ingests into RAG. Activity gets logged everywhere. A new endpoint lets any text become a chat session. You add a "related content" lookup. Zero frontend changes — all backend.</p>
+  <div class="pills">
+    <span class="pill"><b>Duration:</b> 7–10 hrs</span>
+    <span class="pill"><b>Files changed:</b> main.py, rag.py</span>
+    <span class="pill"><b>New endpoints:</b> 3</span>
+    <span class="pill"><b>Existing routes modified:</b> 3</span>
+  </div>
+</div>
+
+<!-- STEP NAV -->
+<div class="stepnav">
+  <a href="#step1">① What you're wiring</a>
+  <a href="#step2">② Add ingest_text to rag.py</a>
+  <a href="#step3">③ Update research stream</a>
+  <a href="#step4">④ Update RAG upload route</a>
+  <a href="#step5">⑤ Update news summarize route</a>
+  <a href="#step6">⑥ Add new endpoints</a>
+  <a href="#step7">⑦ Test everything</a>
+</div>
+
+<!-- ── STEP 1 ── -->
+<div class="step s1" id="step1">
+  <div class="step-header">
+    <div class="step-num">1</div>
+    <div class="step-meta">
+      <div class="step-title">What you're wiring today — the full picture</div>
+      <div class="step-sub">Understand the 4 data flows before touching any code</div>
+    </div>
+  </div>
+
+  <div class="why">
+    <div class="why-label">The goal</div>
+    <p>Yesterday you built the data layer. Today you make features <b>use</b> that data layer to share information with each other. By end of today: completing a research run automatically creates a chateable RAG session. Every major action writes to the activity log. Any text (a news briefing, notes) can be converted to a RAG session. Research reports have a "related content" endpoint that surfaces linked PDFs, runs, and news topics.</p>
+  </div>
+
+  <!-- Flow 1 -->
+  <div class="flow">
+    <div class="flow-title">Wire 1 — Research run → RAG auto-ingest</div>
+    <div class="flow-row">
+      <div class="flow-box">User runs research</div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-box highlight">SSE stream completes</div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-box">save_run() called</div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-box new">auto-ingest report into RAG</div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-box new">rag_session_id sent in 'saved' event</div>
+    </div>
+    <div class="flow-note">Frontend receives <code>rag_session_id</code> in the SSE <code>saved</code> event → can show "Chat with this report" button. <b>Modified file: main.py (research_stream route)</b></div>
+  </div>
+
+  <!-- Flow 2 -->
+  <div class="flow">
+    <div class="flow-title">Wire 2 — ingest-text endpoint (news briefing → RAG session)</div>
+    <div class="flow-row">
+      <div class="flow-box">News page finishes summary</div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-box">User clicks "Save as doc"</div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-box new">POST /api/rag/ingest-text</div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-box new">Session created in background</div>
+    </div>
+    <div class="flow-note">New function <code>ingest_text_content()</code> in rag.py + new route in main.py. <b>New files/functions: rag.py + main.py</b></div>
+  </div>
+
+  <!-- Flow 3 -->
+  <div class="flow">
+    <div class="flow-title">Wire 3 — Activity logging everywhere</div>
+    <div class="flow-row">
+      <div class="flow-box">PDF upload completes</div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-box new">log_activity('pdf_upload')</div>
+    </div>
+    <div class="flow-row">
+      <div class="flow-box">News search runs</div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-box new">log_activity('news_search')</div>
+    </div>
+    <div class="flow-row">
+      <div class="flow-box">Research run saves</div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-box new">log_activity('research_run')</div>
+    </div>
+    <div class="flow-note">One line added to each of the 3 existing routes. Powers the Dashboard activity feed on Day 6.</div>
+  </div>
+
+  <!-- Flow 4 -->
+  <div class="flow">
+    <div class="flow-title">Wire 4 — Related content endpoint</div>
+    <div class="flow-row">
+      <div class="flow-box">GET /api/history/{id}/related</div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-box new">keyword match across RAG sessions</div>
+      <div class="flow-arrow">+</div>
+      <div class="flow-box new">tracked news topics</div>
+      <div class="flow-arrow">+</div>
+      <div class="flow-box new">similar research runs</div>
+    </div>
+    <div class="flow-note">New endpoint. Day 6 frontend uses this to render the "Related Content" sidebar on research reports.</div>
+  </div>
+
+  <div class="note note-amber">
+    <span class="note-icon">⚠</span>
+    <div><b>Order matters:</b> Do Step 2 (rag.py) before Step 3 (main.py). The research stream calls <code>ingest_text_content()</code> from rag.py — it needs to exist first or you'll get an ImportError on restart.</div>
+  </div>
+</div>
+
+<hr>
+
+<!-- ── STEP 2 ── -->
+<div class="step s2" id="step2">
+  <div class="step-header">
+    <div class="step-num">2</div>
+    <div class="step-meta">
+      <div class="step-title">Add ingest_text_content() to rag.py</div>
+      <div class="step-sub">Hour 1–2 · The function that turns any text into a RAG session</div>
+    </div>
+  </div>
+
+  <div class="where">
+    <div class="where-icon">📄</div>
+    <div class="where-body">
+      <div class="where-label">File to edit</div>
+      <div class="where-path">researchos-backend/rag.py</div>
+      <div class="where-desc">Scroll to the very bottom of the file. Paste everything below after the last function.</div>
+    </div>
+  </div>
+
+  <div class="why">
+    <div class="why-label">Why this function is needed</div>
+    <p>Your existing <code>ingest_pdf()</code> function reads a PDF file from disk, chunks it, and embeds it into ChromaDB. But research reports and news briefings are <b>plain text strings</b>, not PDF files. <code>ingest_text_content()</code> does the same chunking and embedding but takes a string instead of a file path. It reuses the exact same Chroma setup and embedding logic — just a different input source.</p>
+  </div>
+
+  <div class="code-wrap">
+    <div class="code-label">
+      <span class="code-label-text">Append to bottom of rag.py</span>
+      <span class="code-label-file">rag.py</span>
+      <span class="code-label-tag tag-new">New function</span>
+    </div>
+    <div class="code-block"><pre><span class="cm"># ══════════════════════════════════════════════════════════════════════════════
+# TEXT INGEST — convert plain text string into a chat-able RAG session
+# NEW: called by research auto-ingest and POST /api/rag/ingest-text
+# ══════════════════════════════════════════════════════════════════════════════</span>
+
+<span class="kw">def</span> <span class="fn">ingest_text_content</span>(
+    text: str,
+    session_id: str,
+    title: str = <span class="st">"Document"</span>,
+) -> dict:
+    <span class="st">"""
+    Ingest plain text (not a PDF file) into ChromaDB so it can be
+    queried via chat_with_pdf() exactly like a PDF session.
+
+    Used for:
+      - Research reports auto-ingested after a run completes
+      - News briefings saved as "documents" from the News page
+      - Any other text content the user wants to chat with
+
+    Args:
+        text:       The full text string to embed
+        session_id: Unique session UUID (same format as PDF sessions)
+        title:      Human-readable title shown in the sessions list
+
+    Returns:
+        dict with chunk_count key
+    """</span>
+    <span class="kw">from</span> langchain.text_splitter <span class="kw">import</span> RecursiveCharacterTextSplitter
+
+    <span class="kw">if not</span> text <span class="kw">or</span> len(text.strip()) < <span class="nb">50</span>:
+        <span class="kw">raise</span> <span class="nb">ValueError</span>(<span class="st">"Text is too short to ingest (minimum 50 characters)"</span>)
+
+    <span class="cm"># Split text into chunks — same settings as PDF ingestion</span>
+    splitter = RecursiveCharacterTextSplitter(
+        chunk_size=MAX_SECTION_CHARS,
+        chunk_overlap=SECTION_OVERLAP,
+        separators=[<span class="st">"\n\n"</span>, <span class="st">"\n"</span>, <span class="st">". "</span>, <span class="st">" "</span>],
+    )
+    chunks = splitter.split_text(text)
+
+    <span class="kw">if not</span> chunks:
+        <span class="kw">raise</span> <span class="nb">ValueError</span>(<span class="st">"Text produced no chunks after splitting"</span>)
+
+    <span class="cm"># Build Document objects with metadata — same format as PDF ingestion</span>
+    docs = [
+        Document(
+            page_content=chunk,
+            metadata={
+                <span class="st">"session_id"</span>: session_id,
+                <span class="st">"title"</span>:      title,
+                <span class="st">"chunk_idx"</span>:  i,
+                <span class="st">"source"</span>:     <span class="st">"text_ingest"</span>,  <span class="cm"># distinguishes from PDF chunks</span>
+            },
+        )
+        <span class="kw">for</span> i, chunk <span class="kw">in</span> enumerate(chunks)
+    ]
+
+    <span class="cm"># Embed and store in ChromaDB — uses the same _get_embeddings() as PDF ingestion</span>
+    embeddings = _get_embeddings()
+    collection_name = <span class="kw">f</span><span class="st">"session_{session_id}"</span>
+
+    Chroma.from_documents(
+        docs,
+        embeddings,
+        persist_directory=str(CHROMA_DIR),
+        collection_name=collection_name,
+    )
+
+    <span class="cm"># Register this session_id → collection mapping (same as PDF sessions)
+    # This is what allows chat_with_pdf() to find the right collection</span>
+    _save_session_map(session_id, collection_name)
+
+    print(<span class="kw">f</span><span class="st">"[TextIngest] session={session_id} ready — {len(chunks)} chunks from '{title}'"</span>)
+    <span class="kw">return</span> {<span class="st">"chunk_count"</span>: len(chunks)}</pre></div>
+  </div>
+
+  <div class="note note-blue">
+    <span class="note-icon">ℹ</span>
+    <div><b>About <code>_save_session_map()</code>:</b> This function already exists in your rag.py — it stores the session_id → collection_name mapping in a JSON file. We're reusing it here exactly as PDFs use it. The <code>chat_with_pdf()</code> function already reads this map, so text sessions are automatically queryable with zero extra changes to the chat logic.</div>
+  </div>
+
+  <div class="note note-amber">
+    <span class="note-icon">⚠</span>
+    <div><b>Check your rag.py for _save_session_map:</b> Search for <code>_save_session_map</code> or <code>_SESSION_MAP_PATH</code> in rag.py. If your file uses a different name for saving the session mapping, use that name here instead.</div>
+  </div>
+</div>
+
+<hr>
+
+<!-- ── STEP 3 ── -->
+<div class="step s3" id="step3">
+  <div class="step-header">
+    <div class="step-num">3</div>
+    <div class="step-meta">
+      <div class="step-title">Update the research stream route</div>
+      <div class="step-sub">Hour 2–4 · The most important wire — research report auto-ingested into RAG after every run</div>
+    </div>
+  </div>
+
+  <div class="where">
+    <div class="where-icon">📄</div>
+    <div class="where-body">
+      <div class="where-label">File to edit</div>
+      <div class="where-path">researchos-backend/main.py</div>
+      <div class="where-desc">Find <code>@app.get("/api/research/stream")</code> around line 336. Replace the entire route function with the version below.</div>
+    </div>
+  </div>
+
+  <div class="why">
+    <div class="why-label">What changes and why</div>
+    <p>The existing route saves the run and sends a <code>saved</code> event with <code>run_id</code>. You're adding 3 things: <b>(1)</b> it accepts an optional <code>workspace_id</code> query param so runs can belong to a workspace. <b>(2)</b> After <code>save_run()</code>, it auto-ingests the report into RAG as a background task and sends <code>rag_session_id</code> in the saved event. <b>(3)</b> It logs activity. That's it — the SSE streaming logic itself is completely unchanged.</p>
+  </div>
+
+  <div class="note note-blue">
+    <span class="note-icon">ℹ</span>
+    <div>First add this import at the top of main.py with the other RAG imports. Find the line <code>from rag import (</code> and add <code>ingest_text_content,</code> to the import list.</div>
+  </div>
+
+  <div class="code-wrap">
+    <div class="code-label">
+      <span class="code-label-text">Step 3a — Update RAG import block</span>
+      <span class="code-label-file">main.py</span>
+      <span class="code-label-tag tag-edit">Find and update existing import</span>
+    </div>
+    <div class="diff">
+<pre><span class="diff-ctx">from rag import (</span>
+<span class="diff-ctx">    ingest_pdf,</span>
+<span class="diff-ctx">    chat_with_pdf,</span>
+<span class="diff-ctx">    get_top_sources,</span>
+<span class="diff-ctx">    delete_session,</span>
+<span class="diff-add">+   ingest_text_content,</span>
+<span class="diff-ctx">)</span></pre>
+    </div>
+  </div>
+
+  <div class="code-wrap" style="margin-top:1.5rem;">
+    <div class="code-label">
+      <span class="code-label-text">Step 3b — Replace the entire research_stream route</span>
+      <span class="code-label-file">main.py</span>
+      <span class="code-label-tag tag-edit">Find @app.get("/api/research/stream") and replace the whole block</span>
+    </div>
+    <div class="code-block"><pre><span class="cm"># ── Research SSE Stream (UPDATED) ─────────────────────────────────────────────
+# Changes from original:
+#   + accepts optional workspace_id query param
+#   + after save_run(), auto-ingests the report into RAG (background task)
+#   + sends rag_session_id in the 'saved' SSE event
+#   + logs activity after successful save
+# The SSE streaming loop itself (lines with "yield") is UNCHANGED.</span>
+
+<span class="op">@app.get</span>(<span class="st">"/api/research/stream"</span>)
+<span class="kw">async def</span> <span class="fn">research_stream</span>(
+    topic:        str = Query(..., min_length=<span class="nb">3</span>, max_length=<span class="nb">300</span>),
+    workspace_id: int = Query(default=<span class="nb">None</span>),   <span class="cm"># NEW — optional workspace linkage</span>
+    current_user: CurrentUser = <span class="nb">None</span>,
+):
+    research_limiter.check(current_user[<span class="st">"id"</span>])
+    user_id = current_user[<span class="st">"id"</span>]
+
+    <span class="kw">async def</span> <span class="fn">event_stream</span>():
+        report    = <span class="st">""</span>
+        feedback  = <span class="st">""</span>
+        last_ping = asyncio.get_event_loop().time()
+
+        <span class="kw">try</span>:
+            <span class="kw">async for</span> event <span class="kw">in</span> run_pipeline_async(topic):
+                now = asyncio.get_event_loop().time()
+                <span class="kw">if</span> now - last_ping > <span class="nb">15</span>:
+                    <span class="kw">yield</span> <span class="kw">f</span><span class="st">"data: {json.dumps({'type': 'ping'})}\n\n"</span>
+                    last_ping = now
+
+                <span class="kw">if</span> event.get(<span class="st">"agent"</span>) == <span class="st">"writer"</span> <span class="kw">and</span> event.get(<span class="st">"type"</span>) <span class="kw">in</span> (<span class="st">"chunk"</span>, <span class="st">"streaming"</span>):
+                    report += event.get(<span class="st">"msg"</span>, <span class="st">""</span>)
+                <span class="kw">if</span> event.get(<span class="st">"agent"</span>) == <span class="st">"critic"</span> <span class="kw">and</span> event.get(<span class="st">"type"</span>) <span class="kw">in</span> (<span class="st">"chunk"</span>, <span class="st">"streaming"</span>):
+                    feedback += event.get(<span class="st">"msg"</span>, <span class="st">""</span>)
+
+                <span class="kw">yield</span> <span class="kw">f</span><span class="st">"data: {json.dumps(event)}\n\n"</span>
+                last_ping = asyncio.get_event_loop().time()
+
+            <span class="kw">if</span> report:
+                <span class="cm"># Save the run (now also stores workspace_id, word_count, source_count)</span>
+                run_id = save_run(
+                    topic,
+                    report,
+                    feedback,
+                    user_id=user_id,
+                    workspace_id=workspace_id,  <span class="cm"># NEW</span>
+                )
+
+                <span class="cm"># ── NEW: Auto-ingest report into RAG as a background task ──────────
+                # Creates a chat session so user can immediately "Chat with this report"
+                # Runs in background — doesn't delay the SSE response</span>
+                rag_session_id = <span class="nb">None</span>
+                <span class="kw">try</span>:
+                    rag_session_id = str(uuid4())
+                    created_at     = datetime.utcnow().isoformat()
+
+                    <span class="cm"># Register session in memory immediately (status=processing)</span>
+                    _rag_sessions[rag_session_id] = {
+                        <span class="st">"user_id"</span>:     user_id,
+                        <span class="st">"filename"</span>:    <span class="kw">f</span><span class="st">"Research: {topic[:60]}"</span>,
+                        <span class="st">"file_path"</span>:   <span class="nb">None</span>,
+                        <span class="st">"created_at"</span>:  created_at,
+                        <span class="st">"history"</span>:     [],
+                        <span class="st">"status"</span>:      <span class="st">"processing"</span>,
+                        <span class="st">"source_type"</span>: <span class="st">"research_run"</span>,
+                        <span class="st">"run_id"</span>:      run_id,
+                    }
+
+                    <span class="cm"># Persist to DB (so it survives restarts)</span>
+                    database.save_rag_session(
+                        rag_session_id,
+                        user_id,
+                        <span class="kw">f</span><span class="st">"Research: {topic[:60]}"</span>,
+                        source_type=<span class="st">"research_run"</span>,
+                        run_id=run_id,
+                        workspace_id=workspace_id,
+                    )
+
+                    <span class="cm"># Ingest text in background — same executor pattern as _run_ingestion</span>
+                    loop = asyncio.get_event_loop()
+                    asyncio.create_task(
+                        _ingest_text_background(rag_session_id, topic, report)
+                    )
+                <span class="kw">except Exception as</span> exc:
+                    print(<span class="kw">f</span><span class="st">"[RAG auto-ingest] Failed to start: {exc}"</span>)
+                    rag_session_id = <span class="nb">None</span>  <span class="cm"># don't send broken id to frontend</span>
+
+                <span class="cm"># ── NEW: Log activity ──────────────────────────────────────────────</span>
+                database.log_activity(
+                    user_id,
+                    <span class="st">"research_run"</span>,
+                    {
+                        <span class="st">"run_id"</span>:        run_id,
+                        <span class="st">"topic"</span>:         topic,
+                        <span class="st">"word_count"</span>:    len(report.split()),
+                        <span class="st">"rag_session_id"</span>: rag_session_id,
+                    },
+                    workspace_id=workspace_id,
+                )
+
+                <span class="cm"># Send run_id AND rag_session_id to the frontend</span>
+                <span class="kw">yield</span> <span class="kw">f</span><span class="st">"data: {json.dumps({'type': 'saved', 'run_id': run_id, 'rag_session_id': rag_session_id})}\n\n"</span>
+
+            <span class="kw">yield</span> <span class="kw">f</span><span class="st">"data: {json.dumps({'type': 'done'})}\n\n"</span>
+
+        <span class="kw">except Exception as</span> exc:
+            <span class="kw">yield</span> <span class="kw">f</span><span class="st">"data: {json.dumps({'type': 'error', 'msg': str(exc)})}\n\n"</span>
+
+        <span class="kw">finally</span>:
+            <span class="kw">del</span> report, feedback
+            gc.collect()
+
+    <span class="kw">return</span> StreamingResponse(
+        event_stream(),
+        media_type=<span class="st">"text/event-stream"</span>,
+        headers={
+            <span class="st">"Cache-Control"</span>:     <span class="st">"no-cache, no-transform"</span>,
+            <span class="st">"X-Accel-Buffering"</span>: <span class="st">"no"</span>,
+            <span class="st">"Connection"</span>:        <span class="st">"keep-alive"</span>,
+            <span class="st">"Transfer-Encoding"</span>: <span class="st">"chunked"</span>,
+        },
+    )</pre></div>
+  </div>
+
+  <div class="code-wrap">
+    <div class="code-label">
+      <span class="code-label-text">Step 3c — Add the background ingestion helper</span>
+      <span class="code-label-file">main.py</span>
+      <span class="code-label-tag tag-new">Add directly above the research_stream route</span>
+    </div>
+    <div class="note note-blue" style="margin-bottom:8px;">
+      <span class="note-icon">ℹ</span>
+      <div>Place this function immediately <b>above</b> the <code>@app.get("/api/research/stream")</code> decorator — it needs to exist before the route that calls it.</div>
+    </div>
+    <div class="code-block"><pre><span class="cm"># ── Background text ingestion helper ──────────────────────────────────────────
+# Called by research_stream to ingest the report into RAG without blocking SSE.
+# Uses asyncio.create_task() so it runs concurrently after the stream ends.
+# Pattern is identical to _run_ingestion() which handles PDF files.</span>
+
+<span class="kw">async def</span> <span class="fn">_ingest_text_background</span>(
+    session_id: str,
+    title: str,
+    text: str,
+) -> <span class="nb">None</span>:
+    <span class="st">"""
+    Background coroutine: ingest plain text into ChromaDB for a RAG session.
+    Updates _rag_sessions[session_id] status when done.
+    Never raises — failures are logged to console only.
+    """</span>
+    loop = asyncio.get_event_loop()
+    <span class="kw">try</span>:
+        <span class="cm"># run_in_executor so the blocking Chroma/embedding code doesn't block the event loop</span>
+        result = <span class="kw">await</span> loop.run_in_executor(
+            <span class="nb">None</span>,
+            <span class="kw">lambda</span>: ingest_text_content(text, session_id, title),
+        )
+        chunk_count = result.get(<span class="st">"chunk_count"</span>, <span class="nb">0</span>)
+
+        <span class="cm"># Update in-memory session dict</span>
+        <span class="kw">if</span> session_id <span class="kw">in</span> _rag_sessions:
+            _rag_sessions[session_id].update({
+                <span class="st">"status"</span>:      <span class="st">"ready"</span>,
+                <span class="st">"chunk_count"</span>: chunk_count,
+                <span class="st">"page_count"</span>:  <span class="nb">1</span>,
+            })
+
+        <span class="cm"># Update DB status</span>
+        database.update_rag_session_status(
+            session_id, <span class="st">"ready"</span>,
+            page_count=<span class="nb">1</span>, chunk_count=chunk_count,
+        )
+        print(<span class="kw">f</span><span class="st">"[TextIngest BG] session={session_id} ready — {chunk_count} chunks"</span>)
+
+    <span class="kw">except Exception as</span> exc:
+        print(<span class="kw">f</span><span class="st">"[TextIngest BG] session={session_id} failed: {exc}"</span>)
+        <span class="kw">if</span> session_id <span class="kw">in</span> _rag_sessions:
+            _rag_sessions[session_id].update({
+                <span class="st">"status"</span>: <span class="st">"error"</span>,
+                <span class="st">"error"</span>:  str(exc),
+            })
+        database.update_rag_session_status(
+            session_id, <span class="st">"error"</span>, error_msg=str(exc)
+        )</pre></div>
+  </div>
+</div>
+
+<hr>
+
+<!-- ── STEP 4 ── -->
+<div class="step s4" id="step4">
+  <div class="step-header">
+    <div class="step-num">4</div>
+    <div class="step-meta">
+      <div class="step-title">Update the RAG upload route — add activity logging + DB persistence</div>
+      <div class="step-sub">Hour 4–5 · Two small additions to the existing rag_upload route</div>
+    </div>
+  </div>
+
+  <div class="where">
+    <div class="where-icon">📄</div>
+    <div class="where-body">
+      <div class="where-label">File to edit</div>
+      <div class="where-path">researchos-backend/main.py</div>
+      <div class="where-desc">Find <code>@app.post("/api/rag/upload")</code> around line 474. Two small additions inside the existing function — shown as a diff.</div>
+    </div>
+  </div>
+
+  <div class="why">
+    <div class="why-label">What changes and why</div>
+    <p>You're adding 2 things to the existing upload route: <b>(1)</b> After registering the session in the <code>_rag_sessions</code> dict, also save it to the DB via <code>database.save_rag_session()</code> — so sessions survive restarts. <b>(2)</b> After the background task is scheduled, call <code>database.log_activity()</code> so PDF uploads appear in the activity feed.</p>
+  </div>
+
+  <div class="code-wrap">
+    <div class="code-label">
+      <span class="code-label-text">Find and update rag_upload — two additions</span>
+      <span class="code-label-file">main.py</span>
+      <span class="code-label-tag tag-edit">Find the rag_upload function, add the highlighted lines</span>
+    </div>
+    <div class="diff">
+<pre><span class="diff-ctx">    # 3. Register session immediately with status="processing"</span>
+<span class="diff-ctx">    created_at = datetime.utcnow().isoformat()</span>
+<span class="diff-ctx">    _rag_sessions[session_id] = {</span>
+<span class="diff-ctx">        "user_id":     current_user["id"],</span>
+<span class="diff-ctx">        "filename":    file.filename,</span>
+<span class="diff-ctx">        "file_path":   str(file_path),</span>
+<span class="diff-ctx">        "created_at":  created_at,</span>
+<span class="diff-ctx">        "history":     [],</span>
+<span class="diff-ctx">        "status":      "processing",</span>
+<span class="diff-ctx">        "page_count":  0,</span>
+<span class="diff-ctx">        "chunk_count": 0,</span>
+<span class="diff-ctx">        "error":       None,</span>
+<span class="diff-ctx">    }</span>
+
+<span class="diff-add">+   # NEW: persist session metadata to DB so it survives server restarts</span>
+<span class="diff-add">+   database.save_rag_session(</span>
+<span class="diff-add">+       session_id,</span>
+<span class="diff-add">+       current_user["id"],</span>
+<span class="diff-add">+       file.filename,</span>
+<span class="diff-add">+       source_type="pdf",</span>
+<span class="diff-add">+   )</span>
+
+<span class="diff-ctx">    # 4. Schedule ingestion to run AFTER this response is sent</span>
+<span class="diff-ctx">    background_tasks.add_task(_run_ingestion, session_id, str(file_path))</span>
+
+<span class="diff-add">+   # NEW: log activity so upload appears in Dashboard feed</span>
+<span class="diff-add">+   database.log_activity(</span>
+<span class="diff-add">+       current_user["id"],</span>
+<span class="diff-add">+       "pdf_upload",</span>
+<span class="diff-add">+       {"session_id": session_id, "filename": file.filename},</span>
+<span class="diff-add">+   )</span>
+
+<span class="diff-ctx">    # 5. Return immediately — don't wait for ingestion</span>
+<span class="diff-ctx">    return {</span>
+<span class="diff-ctx">        "session_id": session_id,</span>
+<span class="diff-ctx">        "filename":   file.filename,</span>
+<span class="diff-ctx">        "status":     "processing",</span>
+<span class="diff-ctx">        "created_at": created_at,</span>
+<span class="diff-ctx">    }</span></pre>
+    </div>
+  </div>
+
+  <div class="note note-indigo">
+    <span class="note-icon">ℹ</span>
+    <div>Also update <code>_run_ingestion()</code> to call <code>database.update_rag_session_status()</code> when ingestion completes. Find the existing <code>_run_ingestion</code> function and add the two highlighted lines:</div>
+  </div>
+
+  <div class="code-wrap">
+    <div class="code-label">
+      <span class="code-label-text">Update _run_ingestion — sync DB status after ingestion</span>
+      <span class="code-label-file">main.py</span>
+      <span class="code-label-tag tag-edit">Add 2 lines to existing _run_ingestion function</span>
+    </div>
+    <div class="diff">
+<pre><span class="diff-ctx">        # Update session with results</span>
+<span class="diff-ctx">        if session_id in _rag_sessions:</span>
+<span class="diff-ctx">            _rag_sessions[session_id].update({</span>
+<span class="diff-ctx">                "status":      "ready",</span>
+<span class="diff-ctx">                "page_count":  page_count,</span>
+<span class="diff-ctx">                "chunk_count": chunk_count,</span>
+<span class="diff-ctx">            })</span>
+<span class="diff-add">+       # NEW: sync status to DB</span>
+<span class="diff-add">+       database.update_rag_session_status(session_id, "ready", page_count=page_count, chunk_count=chunk_count)</span>
+
+<span class="diff-ctx">    except ValueError as exc:</span>
+<span class="diff-ctx">        print(f"[Ingestion] session={session_id} failed (ValueError): {exc}")</span>
+<span class="diff-ctx">        if session_id in _rag_sessions:</span>
+<span class="diff-ctx">            _rag_sessions[session_id].update({"status": "error", "error": str(exc)})</span>
+<span class="diff-add">+       database.update_rag_session_status(session_id, "error", error_msg=str(exc))</span>
+
+<span class="diff-ctx">    except Exception as exc:</span>
+<span class="diff-ctx">        print(f"[Ingestion] session={session_id} failed: {exc}")</span>
+<span class="diff-ctx">        if session_id in _rag_sessions:</span>
+<span class="diff-ctx">            _rag_sessions[session_id].update({"status": "error", "error": f"Processing failed: {exc}"})</span>
+<span class="diff-add">+       database.update_rag_session_status(session_id, "error", error_msg=str(exc))</span></pre>
+    </div>
+  </div>
+</div>
+
+<hr>
+
+<!-- ── STEP 5 ── -->
+<div class="step s5" id="step5">
+  <div class="step-header">
+    <div class="step-num">5</div>
+    <div class="step-meta">
+      <div class="step-title">Update the news summarize route — add activity logging</div>
+      <div class="step-sub">Hour 5 · One small addition — 5 minutes of work</div>
+    </div>
+  </div>
+
+  <div class="where">
+    <div class="where-icon">📄</div>
+    <div class="where-body">
+      <div class="where-label">File to edit</div>
+      <div class="where-path">researchos-backend/main.py</div>
+      <div class="where-desc">Find <code>@app.get("/api/news/summarize")</code> around line 740. Add one call inside the stream function.</div>
+    </div>
+  </div>
+
+  <div class="code-wrap">
+    <div class="code-label">
+      <span class="code-label-text">Update news_summarize — add activity log</span>
+      <span class="code-label-file">main.py</span>
+      <span class="code-label-tag tag-edit">Add the highlighted lines inside the stream() function</span>
+    </div>
+    <div class="diff">
+<pre><span class="diff-ctx">    def stream():</span>
+<span class="diff-ctx">        try:</span>
+<span class="diff-ctx">            yield f"data: {json.dumps({'type': 'articles', 'articles': articles, 'count': len(articles)})}\n\n"</span>
+<span class="diff-ctx">            for chunk in _news_module.summarize_news(articles, topic):</span>
+<span class="diff-ctx">                yield f"data: {json.dumps({'type': 'chunk', 'chunk': chunk})}\n\n"</span>
+<span class="diff-ctx">            yield f"data: {json.dumps({'type': 'done', 'article_count': len(articles)})}\n\n"</span>
+<span class="diff-add">+           # NEW: log activity (runs after stream completes)</span>
+<span class="diff-add">+           if current_user:</span>
+<span class="diff-add">+               database.log_activity(</span>
+<span class="diff-add">+                   current_user["id"],</span>
+<span class="diff-add">+                   "news_search",</span>
+<span class="diff-add">+                   {"topic": topic, "category": cat, "article_count": len(articles)},</span>
+<span class="diff-add">+               )</span>
+<span class="diff-ctx">        except Exception as exc:</span>
+<span class="diff-ctx">            yield f"data: {json.dumps({'type': 'error', 'msg': str(exc)})}\n\n"</span></pre>
+    </div>
+  </div>
+
+  <div class="note note-amber">
+    <span class="note-icon">⚠</span>
+    <div>The <code>news_summarize</code> route has <code>current_user: CurrentUser = None</code> — meaning it's optional auth. The <code>if current_user:</code> guard handles the case where it's called unauthenticated (won't log activity, won't crash).</div>
+  </div>
+</div>
+
+<hr>
+
+<!-- ── STEP 6 ── -->
+<div class="step s6" id="step6">
+  <div class="step-header">
+    <div class="step-num">6</div>
+    <div class="step-meta">
+      <div class="step-title">Add 3 new endpoints to main.py</div>
+      <div class="step-sub">Hour 5–8 · ingest-text route · related content endpoint · server startup loader</div>
+    </div>
+  </div>
+
+  <div class="where">
+    <div class="where-icon">📄</div>
+    <div class="where-body">
+      <div class="where-label">File to edit</div>
+      <div class="where-path">researchos-backend/main.py</div>
+      <div class="where-desc">Append all 3 blocks below at the very end, before <code>if __name__ == "__main__":</code></div>
+    </div>
+  </div>
+
+  <!-- 6A: ingest-text -->
+  <div class="code-wrap">
+    <div class="code-label">
+      <span class="code-label-text">Part A — POST /api/rag/ingest-text</span>
+      <span class="code-label-file">main.py</span>
+      <span class="code-label-tag tag-new">New endpoint — append to bottom</span>
+    </div>
+    <div class="why" style="margin-bottom:10px;">
+      <div class="why-label">What this does</div>
+      <p>Lets the News page convert a briefing into a RAG session. User reads a news summary, clicks "Save as document", frontend calls this endpoint with the summary text and a title. Response returns <code>session_id</code> immediately (status=processing). Frontend redirects user to PDF Chat with that session.</p>
+    </div>
+    <div class="code-block"><pre><span class="cm"># ══════════════════════════════════════════════════════════════════════════════
+# RAG — INGEST TEXT ENDPOINT
+# Converts any plain text into a chateable RAG session.
+# Used by: News page "Save briefing as document" button.
+# ══════════════════════════════════════════════════════════════════════════════</span>
+
+<span class="kw">class</span> <span class="fn">IngestTextRequest</span>(BaseModel):
+    title:   str    <span class="cm"># e.g. "News: climate change 2025-06-19"</span>
+    content: str    <span class="cm"># the full text to embed</span>
+
+
+<span class="op">@app.post</span>(<span class="st">"/api/rag/ingest-text"</span>, tags=[<span class="st">"RAG"</span>])
+<span class="kw">async def</span> <span class="fn">rag_ingest_text</span>(
+    background_tasks: BackgroundTasks,
+    body:             IngestTextRequest,
+    current_user:     CurrentUser,
+):
+    <span class="st">"""
+    Convert plain text into a RAG session.
+
+    Returns session_id immediately (status='processing').
+    Ingestion runs in background. Poll /api/rag/status/{session_id}
+    or just navigate to PDF Chat — it polls automatically.
+
+    Body:
+        title:   name shown in sessions list
+        content: text to embed (minimum 50 characters)
+    """</span>
+    <span class="kw">if</span> len(body.content.strip()) < <span class="nb">50</span>:
+        <span class="kw">raise</span> HTTPException(<span class="nb">422</span>, <span class="st">"Content is too short to create a useful session (min 50 chars)"</span>)
+
+    session_id = str(uuid4())
+    created_at = datetime.utcnow().isoformat()
+    title      = body.title.strip()[:80]  <span class="cm"># cap title length</span>
+
+    <span class="cm"># Register in memory immediately</span>
+    _rag_sessions[session_id] = {
+        <span class="st">"user_id"</span>:     current_user[<span class="st">"id"</span>],
+        <span class="st">"filename"</span>:    title,
+        <span class="st">"file_path"</span>:   <span class="nb">None</span>,
+        <span class="st">"created_at"</span>:  created_at,
+        <span class="st">"history"</span>:     [],
+        <span class="st">"status"</span>:      <span class="st">"processing"</span>,
+        <span class="st">"source_type"</span>: <span class="st">"text_ingest"</span>,
+    }
+
+    <span class="cm"># Persist to DB</span>
+    database.save_rag_session(
+        session_id,
+        current_user[<span class="st">"id"</span>],
+        title,
+        source_type=<span class="st">"text_ingest"</span>,
+    )
+
+    <span class="cm"># Schedule background ingestion</span>
+    background_tasks.add_task(
+        _ingest_text_background, session_id, title, body.content
+    )
+
+    <span class="cm"># Log activity</span>
+    database.log_activity(
+        current_user[<span class="st">"id"</span>],
+        <span class="st">"text_ingested"</span>,
+        {<span class="st">"session_id"</span>: session_id, <span class="st">"title"</span>: title},
+    )
+
+    <span class="kw">return</span> {
+        <span class="st">"session_id"</span>: session_id,
+        <span class="st">"title"</span>:      title,
+        <span class="st">"status"</span>:     <span class="st">"processing"</span>,
+        <span class="st">"created_at"</span>: created_at,
+    }</pre></div>
+  </div>
+
+  <!-- 6B: related content -->
+  <div class="code-wrap">
+    <div class="code-label">
+      <span class="code-label-text">Part B — GET /api/history/{run_id}/related</span>
+      <span class="code-label-file">main.py</span>
+      <span class="code-label-tag tag-new">New endpoint — append after ingest-text route</span>
+    </div>
+    <div class="why" style="margin-bottom:10px;">
+      <div class="why-label">What this does</div>
+      <p>Given a research run, returns related content from all other features — other research runs on similar topics, PDF sessions with similar filenames, and tracked news topics that match keywords. Day 6 frontend uses this to render a "Related Content" sidebar panel on the research report view. Uses simple keyword overlap — no ML needed.</p>
+    </div>
+    <div class="code-block"><pre><span class="cm"># ══════════════════════════════════════════════════════════════════════════════
+# RESEARCH — RELATED CONTENT
+# Surfaces cross-feature content related to a research run.
+# Uses keyword matching — no ML, no new dependencies.
+# ══════════════════════════════════════════════════════════════════════════════</span>
+
+<span class="op">@app.get</span>(<span class="st">"/api/history/{run_id}/related"</span>)
+<span class="kw">async def</span> <span class="fn">get_related_content</span>(run_id: <span class="nb">int</span>, current_user: CurrentUser):
+    <span class="st">"""
+    Return content from other features related to this research run.
+
+    Matches by keyword overlap — first 4 significant words of the topic
+    are checked against: other run topics, RAG session filenames,
+    and tracked news topics.
+
+    Returns:
+        related_runs:         other research runs on similar topics
+        related_rag_sessions: PDF/text sessions with similar titles
+        related_news_topics:  tracked news topics matching keywords
+    """</span>
+    <span class="cm"># Verify run exists and belongs to this user</span>
+    run = get_run(run_id)
+    <span class="kw">if not</span> run:
+        <span class="kw">raise</span> HTTPException(<span class="nb">404</span>, <span class="st">"Run not found"</span>)
+    <span class="kw">if</span> run.get(<span class="st">"user_id"</span>) != current_user[<span class="st">"id"</span>]:
+        <span class="kw">raise</span> HTTPException(<span class="nb">403</span>, <span class="st">"Access denied"</span>)
+
+    topic = run[<span class="st">"topic"</span>]
+    uid   = current_user[<span class="st">"id"</span>]
+
+    <span class="cm"># Extract keywords: lowercase words longer than 3 chars, skip stopwords</span>
+    stopwords = {<span class="st">"with"</span>, <span class="st">"that"</span>, <span class="st">"this"</span>, <span class="st">"from"</span>, <span class="st">"what"</span>, <span class="st">"about"</span>, <span class="st">"does"</span>, <span class="st">"have"</span>}
+    keywords  = [
+        w.lower() <span class="kw">for</span> w <span class="kw">in</span> topic.split()
+        <span class="kw">if</span> len(w) > <span class="nb">3</span> <span class="kw">and</span> w.lower() <span class="kw">not in</span> stopwords
+    ][:5]  <span class="cm"># max 5 keywords</span>
+
+    <span class="kw">def</span> <span class="fn">matches</span>(text: str) -> <span class="nb">bool</span>:
+        <span class="st">"""True if any keyword appears in text (case-insensitive)."""</span>
+        t = text.lower()
+        <span class="kw">return</span> any(kw <span class="kw">in</span> t <span class="kw">for</span> kw <span class="kw">in</span> keywords)
+
+    <span class="cm"># Related research runs (from DB)</span>
+    all_runs = get_history(limit=<span class="nb">100</span>, user_id=uid)
+    related_runs = [
+        {
+            <span class="st">"id"</span>:         r[<span class="st">"id"</span>],
+            <span class="st">"topic"</span>:      r[<span class="st">"topic"</span>],
+            <span class="st">"score"</span>:      r.get(<span class="st">"score"</span>),
+            <span class="st">"created_at"</span>: r.get(<span class="st">"created_at"</span>),
+        }
+        <span class="kw">for</span> r <span class="kw">in</span> all_runs
+        <span class="kw">if</span> r[<span class="st">"id"</span>] != run_id <span class="kw">and</span> matches(r[<span class="st">"topic"</span>])
+    ][:5]
+
+    <span class="cm"># Related RAG sessions (from in-memory dict)</span>
+    related_rag = [
+        {
+            <span class="st">"session_id"</span>:  sid,
+            <span class="st">"filename"</span>:   s.get(<span class="st">"filename"</span>, <span class="st">""</span>),
+            <span class="st">"source_type"</span>: s.get(<span class="st">"source_type"</span>, <span class="st">"pdf"</span>),
+            <span class="st">"created_at"</span>: s.get(<span class="st">"created_at"</span>),
+        }
+        <span class="kw">for</span> sid, s <span class="kw">in</span> _rag_sessions.items()
+        <span class="kw">if</span> s.get(<span class="st">"user_id"</span>) == uid
+        <span class="kw">and</span> s.get(<span class="st">"status"</span>) == <span class="st">"ready"</span>
+        <span class="kw">and</span> matches(s.get(<span class="st">"filename"</span>) <span class="kw">or</span> <span class="st">""</span>)
+    ][:5]
+
+    <span class="cm"># Related tracked news topics (from DB)</span>
+    all_tracked = database.get_tracked_topics(uid)
+    related_news = [
+        {
+            <span class="st">"id"</span>:       t[<span class="st">"id"</span>],
+            <span class="st">"topic"</span>:    t[<span class="st">"topic"</span>],
+            <span class="st">"category"</span>: t[<span class="st">"category"</span>],
+        }
+        <span class="kw">for</span> t <span class="kw">in</span> all_tracked
+        <span class="kw">if</span> matches(t[<span class="st">"topic"</span>])
+    ][:5]
+
+    <span class="kw">return</span> {
+        <span class="st">"run_id"</span>:              run_id,
+        <span class="st">"topic"</span>:               topic,
+        <span class="st">"keywords"</span>:            keywords,
+        <span class="st">"related_runs"</span>:         related_runs,
+        <span class="st">"related_rag_sessions"</span>: related_rag,
+        <span class="st">"related_news_topics"</span>:  related_news,
+    }</pre></div>
+  </div>
+
+  <!-- 6C: startup loader -->
+  <div class="code-wrap">
+    <div class="code-label">
+      <span class="code-label-text">Part C — Update lifespan() to reload RAG sessions on startup</span>
+      <span class="code-label-file">main.py</span>
+      <span class="code-label-tag tag-edit">Find the lifespan() function near the top and replace it</span>
+    </div>
+    <div class="why" style="margin-bottom:10px;">
+      <div class="why-label">What this does</div>
+      <p>Currently <code>lifespan()</code> just calls <code>init_db()</code>. You're adding a second step: on startup, load all RAG session metadata from the DB into the <code>_rag_sessions</code> dict. This means after a server restart, users still see their PDF sessions in the list. Without this, the DB persistence you added in Step 4 wouldn't be visible to the app.</p>
+    </div>
+    <div class="note note-amber" style="margin-bottom:8px;">
+      <span class="note-icon">⚠</span>
+      <div>The <code>lifespan()</code> function is near the very top of main.py, around line 82. The <code>_rag_sessions</code> dict is defined later. Move the lifespan function definition to <b>after</b> the <code>_rag_sessions: dict = {}</code> declaration, or just do the reload inline as shown below.</div>
+    </div>
+    <div class="diff">
+<pre><span class="diff-ctx">@asynccontextmanager</span>
+<span class="diff-ctx">async def lifespan(app: FastAPI):</span>
+<span class="diff-ctx">    init_db()          # creates all tables including agents + support_tickets</span>
+<span class="diff-add">+</span>
+<span class="diff-add">+   # NEW: reload RAG session metadata from DB into the in-memory dict</span>
+<span class="diff-add">+   # This means sessions persist across server restarts</span>
+<span class="diff-add">+   try:</span>
+<span class="diff-add">+       all_db_sessions = database.get_all_rag_sessions()</span>
+<span class="diff-add">+       for s in all_db_sessions:</span>
+<span class="diff-add">+           sid = s["id"]</span>
+<span class="diff-add">+           if sid not in _rag_sessions:  # don't overwrite if already in memory</span>
+<span class="diff-add">+               _rag_sessions[sid] = {</span>
+<span class="diff-add">+                   "user_id":     s["user_id"],</span>
+<span class="diff-add">+                   "filename":    s["filename"],</span>
+<span class="diff-add">+                   "file_path":   None,       # file may not be on disk after restart</span>
+<span class="diff-add">+                   "created_at":  str(s.get("created_at", "")),</span>
+<span class="diff-add">+                   "history":     [],          # chat history is NOT persisted (by design)</span>
+<span class="diff-add">+                   "status":      s.get("status", "ready"),</span>
+<span class="diff-add">+                   "page_count":  s.get("page_count", 0),</span>
+<span class="diff-add">+                   "chunk_count": s.get("chunk_count", 0),</span>
+<span class="diff-add">+                   "source_type": s.get("source_type", "pdf"),</span>
+<span class="diff-add">+                   "run_id":      s.get("run_id"),</span>
+<span class="diff-add">+               }</span>
+<span class="diff-add">+       print(f"[Startup] Reloaded {len(all_db_sessions)} RAG sessions from DB")</span>
+<span class="diff-add">+   except Exception as exc:</span>
+<span class="diff-add">+       print(f"[Startup] RAG session reload failed (non-fatal): {exc}")</span>
+<span class="diff-add">+</span>
+<span class="diff-ctx">    yield</span></pre>
+    </div>
+    <div class="note note-amber" style="margin-top:8px;">
+      <span class="note-icon">⚠</span>
+      <div><b>Important:</b> The <code>lifespan</code> function references <code>_rag_sessions</code>, but that dict is defined further down in the file. In Python this is fine because <code>lifespan</code> is called at runtime (not at import time) — by then <code>_rag_sessions</code> is already defined. If you get a <code>NameError</code>, move <code>_rag_sessions: dict = {}</code> to the top of the file near the imports.</div>
+    </div>
+  </div>
+</div>
+
+<hr>
+
+<!-- ── STEP 7 ── -->
+<div class="step s6" id="step7">
+  <div class="step-header">
+    <div class="step-num">7</div>
+    <div class="step-meta">
+      <div class="step-title">Test everything — Hour 8–9</div>
+      <div class="step-sub">Restart the server. Run 5 test sequences to verify all 4 wires work.</div>
+    </div>
+  </div>
+
+  <div class="code-wrap">
+    <div class="code-label">
+      <span class="code-label-text">Restart backend and check startup logs</span>
+      <span class="code-label-file">Terminal</span>
+    </div>
+    <div class="code-block"><pre><span class="cm"># Ctrl+C to stop, then:</span>
+cd researchos-backend
+python main.py
+
+<span class="cm"># Expected startup logs:</span>
+<span class="cm"># [DB] ResearchOS initialised (PostgreSQL — Supabase)</span>
+<span class="cm"># [Startup] Reloaded N RAG sessions from DB  ← NEW: this should appear</span>
+<span class="cm"># INFO:     Uvicorn running on http://0.0.0.0:8000</span></pre></div>
+  </div>
+
+  <div class="code-wrap">
+    <div class="code-label">
+      <span class="code-label-text">Test 1 — Research stream sends rag_session_id in saved event</span>
+    </div>
+    <div class="code-block"><pre><span class="cm"># Open your browser and run a short research topic from the UI.
+# After it completes, open the browser DevTools Network tab.
+# Find the /api/research/stream request → EventStream tab.
+# You should see a "saved" event like:</span>
+
+data: {"type": "saved", "run_id": 5, "rag_session_id": "f3a1b2c3-..."}
+
+<span class="cm"># rag_session_id should NOT be null — if it is, check the server console
+# for "[RAG auto-ingest] Failed to start:" error messages</span></pre></div>
+  </div>
+
+  <div class="code-wrap">
+    <div class="code-label">
+      <span class="code-label-text">Test 2 — RAG session appears in sessions list after research run</span>
+    </div>
+    <div class="code-block"><pre><span class="cm"># After the research run completes, wait ~10 seconds for background ingestion</span>
+curl http://localhost:8000/api/rag/sessions \
+  -H "Authorization: Bearer YOUR_TOKEN"
+
+<span class="cm"># Expected — should include a session named "Research: your topic":</span>
+{
+  "sessions": [
+    {
+      "session_id": "f3a1b2c3-...",
+      "filename": "Research: artificial intelligence trends"
+    }
+  ]
+}
+
+<span class="cm"># Also check its status (wait 10s then call this):</span>
+curl http://localhost:8000/api/rag/status/f3a1b2c3-... \
+  -H "Authorization: Bearer YOUR_TOKEN"
+
+<span class="cm"># Expected status: "ready" (not "processing") after ~10–30s</span></pre></div>
+  </div>
+
+  <div class="code-wrap">
+    <div class="code-label">
+      <span class="code-label-text">Test 3 — ingest-text endpoint</span>
+    </div>
+    <div class="code-block"><pre>curl -X POST http://localhost:8000/api/rag/ingest-text \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "title": "Climate News Briefing June 2025",
+    "content": "Scientists have confirmed that 2025 is on track to be the warmest year on record. Arctic sea ice has reached a new historical minimum. Several major economies announced accelerated renewable energy targets this week, with the EU pledging 90% clean electricity by 2035. The UN Climate Summit in September is expected to be the most consequential since Paris 2015."
+  }'
+
+<span class="cm"># Expected:</span>
+{
+  "session_id": "a1b2c3d4-...",
+  "title": "Climate News Briefing June 2025",
+  "status": "processing",
+  "created_at": "2025-06-19T..."
+}
+
+<span class="cm"># Check it appears in sessions list:</span>
+curl http://localhost:8000/api/rag/sessions \
+  -H "Authorization: Bearer YOUR_TOKEN"</pre></div>
+  </div>
+
+  <div class="code-wrap">
+    <div class="code-label">
+      <span class="code-label-text">Test 4 — Related content endpoint</span>
+    </div>
+    <div class="code-block"><pre><span class="cm"># Replace 1 with an actual run_id from your history</span>
+curl http://localhost:8000/api/history/1/related \
+  -H "Authorization: Bearer YOUR_TOKEN"
+
+<span class="cm"># Expected (will vary based on your data):</span>
+{
+  "run_id": 1,
+  "topic": "artificial intelligence trends",
+  "keywords": ["artificial", "intelligence", "trends"],
+  "related_runs": [...],
+  "related_rag_sessions": [
+    {
+      "session_id": "f3a1b2c3-...",
+      "filename": "Research: artificial intelligence trends",
+      "source_type": "research_run"
+    }
+  ],
+  "related_news_topics": [...]
+}</pre></div>
+  </div>
+
+  <div class="code-wrap">
+    <div class="code-label">
+      <span class="code-label-text">Test 5 — Activity feed shows research_run + pdf_upload events</span>
+    </div>
+    <div class="code-block"><pre>curl http://localhost:8000/api/activity \
+  -H "Authorization: Bearer YOUR_TOKEN"
+
+<span class="cm"># Expected — should show events from today's testing:</span>
+{
+  "events": [
+    {
+      "event_type": "text_ingested",
+      "payload": {"session_id": "a1b2c3...", "title": "Climate News Briefing June 2025"},
+      "created_at": ...
+    },
+    {
+      "event_type": "research_run",
+      "payload": {"run_id": 5, "topic": "artificial intelligence trends", "word_count": 1240},
+      "created_at": ...
+    }
+  ]
+}
+
+<span class="cm"># Server restart test — stop and restart the server, then:</span>
+curl http://localhost:8000/api/rag/sessions \
+  -H "Authorization: Bearer YOUR_TOKEN"
+<span class="cm"># Sessions should STILL be there (loaded from DB on startup)</span></pre></div>
+  </div>
+
+  <div class="checkpoint">
+    <div class="checkpoint-head">✓ Day 2 Complete — All checkpoints</div>
+    <ul>
+      <li>ingest_text_content() added to rag.py and can chunk + embed text strings</li>
+      <li>_ingest_text_background() helper exists in main.py above research_stream route</li>
+      <li>research_stream route accepts workspace_id query param</li>
+      <li>research_stream sends rag_session_id (not null) in the 'saved' SSE event</li>
+      <li>After a research run, a "Research: topic" session appears in /api/rag/sessions</li>
+      <li>That session reaches status='ready' within 30 seconds</li>
+      <li>POST /api/rag/ingest-text creates a session from plain text</li>
+      <li>GET /api/history/{id}/related returns related content (even if empty arrays)</li>
+      <li>GET /api/activity shows research_run and text_ingested events</li>
+      <li>After server restart, RAG sessions still appear in /api/rag/sessions</li>
+      <li>All existing routes (login, upload, news search, dashboard) still return 200</li>
+    </ul>
+  </div>
+</div>
+
+<hr>
+
+<div class="section-label">Day 2 Summary</div>
+<p style="font-size:14px;color:var(--muted);margin-bottom:1rem;">Everything built today and where the frontend uses it:</p>
+<table class="summary">
+  <thead><tr><th>What you built</th><th>Where used</th><th>Day frontend uses it</th></tr></thead>
+  <tbody>
+    <tr><td>ingest_text_content()</td><td>Research auto-ingest, /api/rag/ingest-text</td><td style="color:var(--muted);font-size:12px">Day 4 ("Chat with report" button)</td></tr>
+    <tr><td>_ingest_text_background()</td><td>Called by research stream + ingest-text route</td><td style="color:var(--muted);font-size:12px">Day 4</td></tr>
+    <tr><td>Research stream: workspace_id param</td><td>Workspace sidebar sends workspace_id</td><td style="color:var(--muted);font-size:12px">Day 5</td></tr>
+    <tr><td>Research stream: rag_session_id in saved event</td><td>Frontend captures and shows "Chat" button</td><td style="color:var(--muted);font-size:12px">Day 4</td></tr>
+    <tr><td>Research stream: log_activity()</td><td>Dashboard activity feed</td><td style="color:var(--muted);font-size:12px">Day 6</td></tr>
+    <tr><td>RAG upload: save_rag_session()</td><td>Sessions survive restarts</td><td style="color:var(--muted);font-size:12px">Immediate</td></tr>
+    <tr><td>RAG upload: log_activity()</td><td>Dashboard activity feed</td><td style="color:var(--muted);font-size:12px">Day 6</td></tr>
+    <tr><td>_run_ingestion: update_rag_session_status()</td><td>DB stays in sync after ingestion</td><td style="color:var(--muted);font-size:12px">Immediate</td></tr>
+    <tr><td>News summarize: log_activity()</td><td>Dashboard activity feed</td><td style="color:var(--muted);font-size:12px">Day 6</td></tr>
+    <tr><td>POST /api/rag/ingest-text</td><td>News "Save briefing as document"</td><td style="color:var(--muted);font-size:12px">Day 6</td></tr>
+    <tr><td>GET /api/history/{id}/related</td><td>RelatedContentPanel sidebar</td><td style="color:var(--muted);font-size:12px">Day 6</td></tr>
+    <tr><td>lifespan() startup reload</td><td>Sessions loaded from DB on boot</td><td style="color:var(--muted);font-size:12px">Immediate</td></tr>
+  </tbody>
+</table>
+
+<div class="note note-green" style="margin-top:2rem;">
+  <span class="note-icon">🚀</span>
+  <div><b>Tomorrow — Day 3:</b> You'll build the global search endpoint that fans out across all feature data, add full-text search to research history, and set up the frontend services layer (new API calls in api.js for all the Day 1–2 endpoints). First frontend work of the sprint.</div>
+</div>
+
+</div>
+</body>
+</html>

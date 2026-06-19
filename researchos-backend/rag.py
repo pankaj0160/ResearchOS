@@ -594,3 +594,81 @@ def delete_session(session_id: str) -> None:
         gc.collect()
     except Exception as e:
         print(f"[RAG] cleanup warning: {e}")
+
+
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# TEXT INGEST — convert plain text string into a chat-able RAG session
+# NEW: called by research auto-ingest and POST /api/rag/ingest-text
+# ══════════════════════════════════════════════════════════════════════════════
+
+def ingest_text_content(
+    text: str,
+    session_id: str,
+    title: str = "Document",
+) -> dict:
+    """
+    Ingest plain text (not a PDF file) into ChromaDB so it can be
+    queried via chat_with_pdf() exactly like a PDF session.
+
+    Used for:
+      - Research reports auto-ingested after a run completes
+      - News briefings saved as "documents" from the News page
+      - Any other text content the user wants to chat with
+
+    Args:
+        text:       The full text string to embed
+        session_id: Unique session UUID (same format as PDF sessions)
+        title:      Human-readable title shown in the sessions list
+
+    Returns:
+        dict with chunk_count key
+    """
+    from langchain.text_splitter import RecursiveCharacterTextSplitter
+
+    if not text or len(text.strip()) < 50:
+        raise ValueError("Text is too short to ingest (minimum 50 characters)")
+
+    # Split text into chunks — same settings as PDF ingestion
+    splitter = RecursiveCharacterTextSplitter(
+        chunk_size=MAX_SECTION_CHARS,
+        chunk_overlap=SECTION_OVERLAP,
+        separators=["\n\n", "\n", ". ", " "],
+    )
+    chunks = splitter.split_text(text)
+
+    if not chunks:
+        raise ValueError("Text produced no chunks after splitting")
+
+    # Build Document objects with metadata — same format as PDF ingestion
+    docs = [
+        Document(
+            page_content=chunk,
+            metadata={
+                "session_id": session_id,
+                "title":      title,
+                "chunk_idx":  i,
+                "source":     "text_ingest",  # distinguishes from PDF chunks
+            },
+        )
+        for i, chunk in enumerate(chunks)
+    ]
+
+    # Embed and store in ChromaDB — uses the same _get_embeddings() as PDF ingestion
+    embeddings = _get_embeddings()
+    collection_name = f"session_{session_id}"
+
+    Chroma.from_documents(
+        docs,
+        embeddings,
+        persist_directory=str(CHROMA_DIR),
+        collection_name=collection_name,
+    )
+
+    # Register this session_id → collection mapping (same as PDF sessions)
+    # This is what allows chat_with_pdf() to find the right collection
+    _save_session_map(session_id, collection_name)
+
+    print(f"[TextIngest] session={session_id} ready — {len(chunks)} chunks from '{title}'")
+    return {"chunk_count": len(chunks)}
