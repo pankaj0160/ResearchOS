@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from 'react'
 import { Link, NavLink, Outlet, useNavigate } from 'react-router-dom'
 import { useAuth } from '../../context/AuthContext'
 import { useTheme } from '../../context/ThemeProvider'
+import { CommandPalette } from './CommandPalette'   // NEW
 
 const NAV = [
   {
@@ -21,6 +22,7 @@ export default function AppShell() {
   const navigate                = useNavigate()
   const [collapsed, setCollapsed]       = useState(false)
   const [userMenuOpen, setUserMenuOpen] = useState(false)
+  const [paletteOpen,  setPaletteOpen]  = useState(false)  // NEW
   const userMenuRef = useRef(null)
 
   useEffect(() => {
@@ -32,6 +34,18 @@ export default function AppShell() {
     if (userMenuOpen) document.addEventListener('mousedown', handleClickOutside)
     return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [userMenuOpen])
+
+  useEffect(() => {
+    function handleKey(e) {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+        e.preventDefault()
+        setPaletteOpen(prev => !prev)
+      }
+    }
+
+    window.addEventListener('keydown', handleKey)
+    return () => window.removeEventListener('keydown', handleKey)
+  }, [])
 
   function handleLogout() {
     logout()
@@ -148,6 +162,45 @@ export default function AppShell() {
             padding: '16px 8px', overflowY: 'auto', overflowX: 'hidden',
           }}
         >
+
+          <button
+            onClick={() => setPaletteOpen(true)}
+            title="Search (Ctrl+K)"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 10,
+              width: 'calc(100% - 24px)',
+              margin: '8px 12px 14px',
+              padding: '8px 12px',
+              background: isDark ? 'rgba(255,255,255,0.04)' : 'rgba(2, 0, 0, 0.04)',
+              border: `1px solid ${isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.10)'}`,
+              borderRadius: 10,
+              cursor: 'pointer',
+              color: isDark ? 'rgba(255,255,255,0.4)' : 'rgba(0, 0, 0, 0.4)',
+              fontSize: 13,
+              fontFamily: 'inherit',
+            }}
+          >
+            {collapsed ? (
+              '⌕'
+            ) : (
+              <>
+                <span style={{ fontSize: 16 }}>⌕</span>
+                <span style={{ flex: 1, textAlign: 'left' }}>Search…</span>
+                <kbd
+                  style={{
+                    fontSize: 10,
+                    padding: '1px 6px',
+                    background: isDark ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.07)',
+                    borderRadius: 4,
+                  }}
+                >
+                  Ctrl+K
+                </kbd>
+              </>
+            )}
+          </button>
           {NAV.map(group => (
             <div key={group.section}>
               {!collapsed && (
@@ -393,6 +446,11 @@ export default function AppShell() {
           </NavLink>
         ))}
       </nav>
+
+      <CommandPalette
+        open={paletteOpen}
+        onClose={() => setPaletteOpen(false)}
+      />
 
     </div>
   )

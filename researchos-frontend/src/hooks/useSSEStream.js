@@ -29,6 +29,7 @@ export function useSSEStream() {
   const [error,     setError]     = useState(null)
   const [topic,     setTopic]     = useState('')
   const [runId,     setRunId]     = useState(null)
+  const [ragSessionId, setRagSessionId] = useState(null)
 
   const eventSourceRef = useRef(null)
   const timeoutRef     = useRef(null)
@@ -131,6 +132,7 @@ export function useSSEStream() {
     // ── Saved event (backend persisted the run) ───────────────────────────────
     if (type === 'saved') {
       setRunId(event.run_id || null)
+      setRagSessionId(event.rag_session_id || null)  // NEW: capture RAG session id
       return
     }
 
@@ -227,7 +229,7 @@ export function useSSEStream() {
     }
   }, [closeStream, failRun, milestones.length, patchStep, pushMilestone, pushRawLog])
 
-  const start = useCallback((nextTopic) => {
+  const start = useCallback((nextTopic, workspaceId = null) => {
     const cleanTopic = nextTopic.trim()
     if (!cleanTopic) return
 
@@ -249,11 +251,13 @@ export function useSSEStream() {
     setFeedback('')
     setError(null)
     setRunId(null)
+    setRagSessionId(null)   // reset so old button doesn't show on new run
     setRunStatus('loading')
 
     const token   = localStorage.getItem('researchos_token')
     const params  = new URLSearchParams({ topic: cleanTopic })
     if (token) params.set('token', token)
+    if (workspaceId) params.set('workspace_id', String(workspaceId))  // NEW
 
     const apiBase = import.meta.env.VITE_API_URL || ''
     const source  = new EventSource(
@@ -304,6 +308,7 @@ export function useSSEStream() {
     setError(null)
     setTopic('')
     setRunId(null)
+    setRagSessionId(null)
   }, [closeStream])
 
   const retry = useCallback(() => {
@@ -323,6 +328,7 @@ export function useSSEStream() {
     error,
     topic,
     runId,
+    ragSessionId,          // NEW: null until research run completes
     isRunning: runStatus === 'loading' || runStatus === 'running' || runStatus === 'generating_report',
     isDone:    runStatus === 'completed',
     start,

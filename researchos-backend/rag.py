@@ -1,12 +1,4 @@
-"""
-rag.py — Zero-RAM RAG using google-generativeai SDK.
-
-Root cause of all 404 errors:
-  Hardcoding model names + REST calls = breaks when Google changes availability.
-  Fix: use google-generativeai SDK which auto-resolves the correct endpoint.
-
-pip install google-generativeai
-"""
+# rag.py — Zero-RAM RAG using google-generativeai SDK.
 
 from __future__ import annotations
 
@@ -73,9 +65,16 @@ def _collection_exists(doc_hash: str) -> bool:
 
 
 # ── Session → doc_hash mapping ────────────────────────────────────────────────
-# This is the fix: we keep a persistent session_id → doc_hash lookup so that
-# chat_with_pdf / get_top_sources can find the right Chroma collection.
-# The cache hit/miss logic based on doc_hash is completely unchanged.
+#
+# Storage contract (FIXED):
+#   PDF sessions  → value is the raw doc_hash (e.g. "a1b2c3d4e5f6g7h8")
+#                   collection name = f"doc_{doc_hash}"
+#   Text sessions → value is "text:{session_id}"
+#                   collection name = f"session_{session_id}"
+#
+# chat_with_pdf / get_top_sources call _resolve_collection() which
+# reconstructs the correct collection name from whatever is stored.
+# Nothing outside this module needs to know the difference.
 
 _SESSION_MAP_PATH = CHROMA_DIR / "session_map.json"
 
@@ -90,16 +89,52 @@ def _save_session_map(m: dict) -> None:
     _SESSION_MAP_PATH.write_text(json.dumps(m))
 
 
-def _register_session(session_id: str, doc_hash: str) -> None:
-    """Link a session_id to the doc_hash collection it should query."""
+def _register_pdf_session(session_id: str, doc_hash: str) -> None:
+    """
+    Store raw doc_hash (no prefix) for a PDF session.
+    Collection name will always be reconstructed as f"doc_{doc_hash}".
+    """
     m = _load_session_map()
-    m[session_id] = doc_hash
+    m[session_id] = doc_hash          # ← always the bare hash, never "doc_..."
     _save_session_map(m)
 
 
-def _get_collection_for_session(session_id: str) -> str | None:
-    """Return the doc_hash for a session, or None if not found."""
-    return _load_session_map().get(session_id)
+def _register_text_session(session_id: str) -> None:
+    """
+    Store a sentinel value for a text-ingest session.
+    Collection name will always be reconstructed as f"session_{session_id}".
+    """
+    m = _load_session_map()
+    m[session_id] = f"text:{session_id}"   # ← sentinel distinguishes from PDF
+    _save_session_map(m)
+
+
+def _resolve_collection(session_id: str) -> str | None:
+    """
+    Return the fully-qualified Chroma collection name for a session,
+    or None if the session is unknown.
+
+    Handles all three legacy storage formats so old sessions still work:
+      - bare hash       → "doc_{hash}"            (PDF, correct new format)
+      - "doc_{hash}"    → "doc_{hash}"            (PDF cache-hit, old bug)
+      - "session_{sid}" → "session_{sid}"         (text, old bug)
+      - "text:{sid}"    → "session_{sid}"         (text, new format)
+    """
+    raw = _load_session_map().get(session_id)
+    if raw is None:
+        return None
+
+    # New text-ingest sentinel
+    if raw.startswith("text:"):
+        sid = raw[len("text:"):]
+        return f"session_{sid}"
+
+    # Already a full collection name (legacy cache-hit bug or old text ingest)
+    if raw.startswith("doc_") or raw.startswith("session_"):
+        return raw
+
+    # Bare hash — the correct PDF format
+    return f"doc_{raw}"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -126,19 +161,10 @@ FORMATTING (use Markdown):
 """
 
 # ══════════════════════════════════════════════════════════════════════════════
-# EMBEDDING — uses official SDK, no manual URL/model guessing
+# EMBEDDING
 # ══════════════════════════════════════════════════════════════════════════════
 
 class GeminiEmbeddings(Embeddings):
-    """
-    Uses google-generativeai SDK — no hardcoded URLs, no model guessing.
-    SDK auto-picks the correct endpoint for your key type.
-
-    Install: pip install google-generativeai
-    Key:     https://aistudio.google.com/app/apikey
-    """
-
-    # Models to try in order — SDK resolves the correct endpoint for each
     _MODELS = [
         "models/gemini-embedding-001",
         "models/gemini-embedding-2",
@@ -147,19 +173,15 @@ class GeminiEmbeddings(Embeddings):
 
     def __init__(self, api_key: str):
         self.api_key     = api_key
-        self._model_name = None   # resolved on first call
+        self._model_name = None
         self._client     = None
 
     def _get_client(self):
         if self._client is None:
             try:
                 from google import genai
-                from google.genai import types
             except ImportError:
-                raise RuntimeError(
-                    "google-genai not installed. "
-                    "Run: pip install google-genai"
-                )
+                raise RuntimeError("google-genai not installed. Run: pip install google-genai")
             self._client = genai.Client(api_key=self.api_key)
         return self._client
 
@@ -168,7 +190,6 @@ class GeminiEmbeddings(Embeddings):
             return self._model_name
 
         client = self._get_client()
-
         try:
             available = [
                 m.name for m in client.models.list()
@@ -190,34 +211,27 @@ class GeminiEmbeddings(Embeddings):
             print(f"[RAG] Using first available: {self._model_name}")
             return self._model_name
 
-        # Hardcode best known working model as last resort
         self._model_name = "models/gemini-embedding-001"
         return self._model_name
 
     def _embed_one(self, text: str) -> list[float]:
         client = self._get_client()
         model  = self._resolve_model()
-
-        max_retries = 4
-        for attempt in range(max_retries):
+        for attempt in range(4):
             try:
-                result = client.models.embed_content(
-                    model    = model,
-                    contents = text[:8000],
-                )
+                result = client.models.embed_content(model=model, contents=text[:8000])
                 return result.embeddings[0].values
             except Exception as e:
-                if attempt == max_retries - 1:
+                if attempt == 3:
                     raise
                 wait = 2 ** attempt
-                print(f"[RAG] Embedding call failed (attempt {attempt+1}/{max_retries}): {e}. Retrying in {wait}s...")
+                print(f"[RAG] Embedding failed (attempt {attempt+1}/4): {e}. Retrying in {wait}s...")
                 time.sleep(wait)
 
     def embed_documents(self, texts: list[str]) -> list[list[float]]:
         embeddings = []
         for i, text in enumerate(texts):
             embeddings.append(self._embed_one(text))
-            # Free tier: 100 requests/min — pace at ~80/min to be safe
             if i > 0 and i % 80 == 0:
                 print(f"[RAG] Rate limit pause at chunk {i}...")
                 time.sleep(62)
@@ -230,17 +244,11 @@ class GeminiEmbeddings(Embeddings):
 
 
 class TFIDFEmbeddings(Embeddings):
-    """
-    Pure Python fallback — zero dependencies, zero RAM.
-    Used when GOOGLE_API_KEY is not set.
-    Lower quality but never crashes.
-    """
-
     VOCAB_SIZE = 512
 
     def __init__(self):
-        self._vocab:   dict[str, int]   = {}
-        self._idf:     dict[str, float] = {}
+        self._vocab:  dict[str, int]   = {}
+        self._idf:    dict[str, float] = {}
         self._fitted = False
 
     def _tokenize(self, text: str) -> list[str]:
@@ -248,15 +256,15 @@ class TFIDFEmbeddings(Embeddings):
 
     def _fit(self, texts: list[str]) -> None:
         import math
-        N  = len(texts)
+        N = len(texts)
         df: dict[str, int] = {}
         for t in texts:
             for tok in set(self._tokenize(t)):
                 df[tok] = df.get(tok, 0) + 1
         top = sorted(df.items(), key=lambda x: x[1], reverse=True)[:self.VOCAB_SIZE]
-        self._vocab   = {tok: i for i, (tok, _) in enumerate(top)}
-        self._idf     = {tok: math.log((N+1)/(cnt+1))+1 for tok, cnt in top}
-        self._fitted  = True
+        self._vocab  = {tok: i for i, (tok, _) in enumerate(top)}
+        self._idf    = {tok: math.log((N+1)/(cnt+1))+1 for tok, cnt in top}
+        self._fitted = True
 
     def _vectorize(self, text: str) -> list[float]:
         import math
@@ -280,22 +288,18 @@ class TFIDFEmbeddings(Embeddings):
         return self._vectorize(text)
 
 
-# ── Singleton ─────────────────────────────────────────────────────────────────
-
 _embeddings_instance: Embeddings | None = None
 
 def _get_embeddings() -> Embeddings:
     global _embeddings_instance
     if _embeddings_instance is not None:
         return _embeddings_instance
-
     if GOOGLE_API_KEY:
         print("[RAG] Using Google Gemini embeddings (0MB RAM)")
         _embeddings_instance = GeminiEmbeddings(GOOGLE_API_KEY)
     else:
         print("[RAG] No GOOGLE_API_KEY — using TF-IDF fallback")
         _embeddings_instance = TFIDFEmbeddings()
-
     return _embeddings_instance
 
 
@@ -342,10 +346,10 @@ def ingest_pdf(file_path: str, session_id: str) -> dict:
 
     from pypdf import PdfReader
 
-    doc_hash = compute_file_hash(file_path)
+    doc_hash        = compute_file_hash(file_path)
     collection_name = f"doc_{doc_hash}"
 
-    # ── CACHE HIT — same PDF was uploaded before, skip re-embedding ──────────
+    # ── CACHE HIT ─────────────────────────────────────────────────────────────
     if _collection_exists(doc_hash) and _meta_path(doc_hash).exists():
         print(f"[RAG] Cache HIT — doc_hash={doc_hash}, skipping embedding")
         meta = _load_meta(doc_hash)
@@ -354,8 +358,8 @@ def ingest_pdf(file_path: str, session_id: str) -> dict:
         except Exception:
             pass
 
-        # FIX: register this session_id → doc_hash so lookups work
-        _register_session(session_id, doc_hash)
+        # FIX: store raw doc_hash (not the prefixed collection name)
+        _register_pdf_session(session_id, doc_hash)
 
         return {
             "session_id":    session_id,
@@ -366,7 +370,7 @@ def ingest_pdf(file_path: str, session_id: str) -> dict:
             "cached":        True,
         }
 
-    # ── CACHE MISS — new PDF, embed and store ─────────────────────────────────
+    # ── CACHE MISS ────────────────────────────────────────────────────────────
     print(f"[RAG] Cache MISS — doc_hash={doc_hash}, embedding now")
 
     reader     = PdfReader(file_path)
@@ -386,8 +390,8 @@ def ingest_pdf(file_path: str, session_id: str) -> dict:
         clean = _clean_text(raw)
         for idx, chunk_text in enumerate(_sub_chunk(clean, MAX_SECTION_CHARS, SECTION_OVERLAP)):
             all_chunks.append(Document(
-                page_content = chunk_text,
-                metadata     = {
+                page_content=chunk_text,
+                metadata={
                     "page":         page_num + 1,
                     "section_name": f"Page {page_num + 1}",
                     "section_num":  page_num + 1,
@@ -427,8 +431,8 @@ def ingest_pdf(file_path: str, session_id: str) -> dict:
 
     _save_meta(doc_hash, {"page_count": page_count, "chunk_count": chunk_count})
 
-    # FIX: register this session_id → doc_hash so lookups work
-    _register_session(session_id, doc_hash)
+    # FIX: store raw doc_hash consistently (same as cache-hit path above)
+    _register_pdf_session(session_id, doc_hash)
 
     return {
         "session_id":    session_id,
@@ -443,48 +447,35 @@ def ingest_pdf(file_path: str, session_id: str) -> dict:
 # ── Reranker ──────────────────────────────────────────────────────────────────
 
 COHERE_API_KEY = os.getenv("COHERE_API_KEY", "")
-def _cohere_rerank(question: str, docs_with_scores: list[tuple], top_n: int = TOP_K_FINAL) -> list[tuple]:
-    """Rerank candidate chunks using Cohere's cross-encoder rerank API.
-    Falls back to the heuristic _rerank() if Cohere is unavailable or errors.
 
-    Supports both cohere SDK v4 (Client) and v5 (ClientV2).
-    """
+def _cohere_rerank(question: str, docs_with_scores: list[tuple], top_n: int = TOP_K_FINAL) -> list[tuple]:
     if not COHERE_API_KEY:
         print("[RAG] No COHERE_API_KEY — using heuristic reranker")
         return _rerank(question, docs_with_scores, top_n)
 
     try:
         import cohere
-
-        # ── SDK version detection ─────────────────────────────────────────────
-        # cohere v5+ exposes ClientV2; v4 only has Client.
-        # We try v5 first (recommended), fall back to v4.
         try:
             co = cohere.ClientV2(api_key=COHERE_API_KEY)
         except AttributeError:
-            co = cohere.Client(api_key=COHERE_API_KEY)   # cohere v4
+            co = cohere.Client(api_key=COHERE_API_KEY)
 
         docs_text = [d.page_content for d, _ in docs_with_scores]
         if not docs_text:
             return _rerank(question, docs_with_scores, top_n)
 
         result = co.rerank(
-            model="rerank-v3.5",
-            query=question,
-            documents=docs_text,
-            top_n=min(top_n, len(docs_text)),   # top_n must not exceed len(docs)
+            model     = "rerank-v3.5",
+            query     = question,
+            documents = docs_text,
+            top_n     = min(top_n, len(docs_text)),
         )
-
-        reranked = [
-            (docs_with_scores[r.index][0], r.relevance_score)
-            for r in result.results
-        ]
-        return reranked
+        return [(docs_with_scores[r.index][0], r.relevance_score) for r in result.results]
 
     except Exception as e:
         print(f"[RAG] Cohere rerank failed ({e}) — falling back to heuristic")
         return _rerank(question, docs_with_scores, top_n)
-    
+
 
 def _rerank(question: str, docs_with_scores: list[tuple], top_n: int = TOP_K_FINAL) -> list[tuple]:
     q_tokens = set(re.sub(r"[^\w\s]", "", question.lower()).split())
@@ -512,14 +503,15 @@ def chat_with_pdf(session_id: str, question: str, history: list[tuple[str, str]]
         yield "PDF Chat is currently unavailable on this deployment."
         return
 
-    # FIX: resolve the actual collection name from the session_id
-    doc_hash = _get_collection_for_session(session_id)
-    if not doc_hash:
+    # FIX: _resolve_collection() returns the correct fully-qualified name
+    # regardless of how / when the session was registered.
+    collection_name = _resolve_collection(session_id)
+    if not collection_name:
         yield f"Session '{session_id}' not found. Please re-upload your PDF."
         return
 
     vectorstore = Chroma(
-        collection_name    = f"doc_{doc_hash}",
+        collection_name    = collection_name,          # ← already correct name
         embedding_function = _get_embeddings(),
         persist_directory  = str(CHROMA_DIR),
     )
@@ -528,7 +520,7 @@ def chat_with_pdf(session_id: str, question: str, history: list[tuple[str, str]]
     filtered = [(d, s) for d, s in raw if s >= MIN_SCORE] or [(d, s) for d, s in raw if s >= 0.15]
 
     if not filtered:
-        sections = list({d.metadata.get("section_name","?") for d,_ in raw[:3]})
+        sections = list({d.metadata.get("section_name", "?") for d, _ in raw[:3]})
         yield f'Could not find content for "{question}".\nDocument covers: {", ".join(sections)}.'
         return
 
@@ -536,8 +528,17 @@ def chat_with_pdf(session_id: str, question: str, history: list[tuple[str, str]]
     del raw, filtered
     gc.collect()
 
-    history_text = "".join(f"<user>{q}</user>\n<assistant>{a}</assistant>\n" for q, a in history[-MAX_HISTORY:])
-    prompt = f"{_SYSTEM_PROMPT}\n\n=== CHUNKS ===\n{context}\n\n=== HISTORY ===\n{history_text or '(none)'}\n\n=== QUESTION ===\n{question}\n\n=== ANSWER ==="
+    history_text = "".join(
+        f"<user>{q}</user>\n<assistant>{a}</assistant>\n"
+        for q, a in history[-MAX_HISTORY:]
+    )
+    prompt = (
+        f"{_SYSTEM_PROMPT}\n\n"
+        f"=== CHUNKS ===\n{context}\n\n"
+        f"=== HISTORY ===\n{history_text or '(none)'}\n\n"
+        f"=== QUESTION ===\n{question}\n\n"
+        f"=== ANSWER ==="
+    )
 
     del context, history_text
     gc.collect()
@@ -552,20 +553,25 @@ def get_top_sources(session_id: str, question: str) -> list[dict]:
     if LOW_MEMORY_MODE:
         return []
 
-    # FIX: resolve the actual collection name from the session_id
-    doc_hash = _get_collection_for_session(session_id)
-    if not doc_hash:
+    # FIX: same resolver used here
+    collection_name = _resolve_collection(session_id)
+    if not collection_name:
         print(f"[RAG] get_top_sources: no collection found for session_id={session_id}")
         return []
 
     vectorstore = Chroma(
-        collection_name    = f"doc_{doc_hash}",
+        collection_name    = collection_name,
         embedding_function = _get_embeddings(),
         persist_directory  = str(CHROMA_DIR),
     )
-    raw      = vectorstore.similarity_search_with_relevance_scores(question, k=TOP_K_RETRIEVE)
-    result   = [
-        {"section": d.metadata.get("section_name","?"), "snippet": d.page_content[:200].strip(), "score": round(s,3), "passed_threshold": s >= MIN_SCORE}
+    raw    = vectorstore.similarity_search_with_relevance_scores(question, k=TOP_K_RETRIEVE)
+    result = [
+        {
+            "section":          d.metadata.get("section_name", "?"),
+            "snippet":          d.page_content[:200].strip(),
+            "score":            round(s, 3),
+            "passed_threshold": s >= MIN_SCORE,
+        }
         for d, s in _cohere_rerank(question, raw)
     ]
     del raw
@@ -576,18 +582,16 @@ def get_top_sources(session_id: str, question: str) -> list[dict]:
 # ── Cleanup ───────────────────────────────────────────────────────────────────
 
 def delete_session(session_id: str) -> None:
-    # FIX: resolve the actual collection name from the session_id
-    doc_hash = _get_collection_for_session(session_id)
-    if not doc_hash:
+    collection_name = _resolve_collection(session_id)
+    if not collection_name:
         print(f"[RAG] delete_session: no collection found for session_id={session_id}")
         return
     try:
         Chroma(
-            collection_name    = f"doc_{doc_hash}",
+            collection_name    = collection_name,
             embedding_function = _get_embeddings(),
             persist_directory  = str(CHROMA_DIR),
         ).delete_collection()
-        # Remove from session map
         m = _load_session_map()
         m.pop(session_id, None)
         _save_session_map(m)
@@ -596,11 +600,8 @@ def delete_session(session_id: str) -> None:
         print(f"[RAG] cleanup warning: {e}")
 
 
-
-
 # ══════════════════════════════════════════════════════════════════════════════
-# TEXT INGEST — convert plain text string into a chat-able RAG session
-# NEW: called by research auto-ingest and POST /api/rag/ingest-text
+# TEXT INGEST
 # ══════════════════════════════════════════════════════════════════════════════
 
 def ingest_text_content(
@@ -609,66 +610,53 @@ def ingest_text_content(
     title: str = "Document",
 ) -> dict:
     """
-    Ingest plain text (not a PDF file) into ChromaDB so it can be
-    queried via chat_with_pdf() exactly like a PDF session.
+    Ingest plain text into ChromaDB so it can be queried via chat_with_pdf().
 
-    Used for:
-      - Research reports auto-ingested after a run completes
-      - News briefings saved as "documents" from the News page
-      - Any other text content the user wants to chat with
-
-    Args:
-        text:       The full text string to embed
-        session_id: Unique session UUID (same format as PDF sessions)
-        title:      Human-readable title shown in the sessions list
-
-    Returns:
-        dict with chunk_count key
+    Collection name: f"session_{session_id}"
+    Registered in session_map as: "text:{session_id}"
+    Resolved by _resolve_collection() back to: f"session_{session_id}"
     """
     from langchain.text_splitter import RecursiveCharacterTextSplitter
 
     if not text or len(text.strip()) < 50:
         raise ValueError("Text is too short to ingest (minimum 50 characters)")
 
-    # Split text into chunks — same settings as PDF ingestion
     splitter = RecursiveCharacterTextSplitter(
-        chunk_size=MAX_SECTION_CHARS,
-        chunk_overlap=SECTION_OVERLAP,
-        separators=["\n\n", "\n", ". ", " "],
+        chunk_size    = MAX_SECTION_CHARS,
+        chunk_overlap = SECTION_OVERLAP,
+        separators    = ["\n\n", "\n", ". ", " "],
     )
     chunks = splitter.split_text(text)
 
     if not chunks:
         raise ValueError("Text produced no chunks after splitting")
 
-    # Build Document objects with metadata — same format as PDF ingestion
     docs = [
         Document(
             page_content=chunk,
             metadata={
-                "session_id": session_id,
-                "title":      title,
-                "chunk_idx":  i,
-                "source":     "text_ingest",  # distinguishes from PDF chunks
+                "session_id":   session_id,
+                "title":        title,
+                "chunk_idx":    i,
+                "source":       "text_ingest",
+                "section_name": title,     # ← makes "Document covers:" meaningful
             },
         )
         for i, chunk in enumerate(chunks)
     ]
 
-    # Embed and store in ChromaDB — uses the same _get_embeddings() as PDF ingestion
-    embeddings = _get_embeddings()
     collection_name = f"session_{session_id}"
 
     Chroma.from_documents(
         docs,
-        embeddings,
-        persist_directory=str(CHROMA_DIR),
-        collection_name=collection_name,
+        _get_embeddings(),
+        persist_directory = str(CHROMA_DIR),
+        collection_name   = collection_name,
     )
 
-    # Register this session_id → collection mapping (same as PDF sessions)
-    # This is what allows chat_with_pdf() to find the right collection
-    _save_session_map(session_id, collection_name)
+    # FIX: use _register_text_session (stores "text:{session_id}" sentinel)
+    # so _resolve_collection() returns "session_{session_id}" correctly
+    _register_text_session(session_id)
 
     print(f"[TextIngest] session={session_id} ready — {len(chunks)} chunks from '{title}'")
     return {"chunk_count": len(chunks)}

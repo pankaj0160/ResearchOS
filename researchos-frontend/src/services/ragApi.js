@@ -138,4 +138,19 @@ export const ragApi = {
 
   throw new Error('Processing timed out. Please try again.')
 },
+
+
+ // ── NEW: Text ingest ────────────────────────────────────────────────────────
+
+  ingestText: (title, content) =>
+    request('/api/rag/ingest-text', {
+      method: 'POST',
+      body: JSON.stringify({ title, content }),
+    }),
+
+  // ── NEW: Related content ─────────────────────────────────────────────────────
+
+  getRelated: (runId) =>
+    request(`/api/history/${runId}/related`),
 }
+

@@ -3,8 +3,14 @@ import { NewsSearchBar }   from '../components/News/NewsSearchBar'
 import { NewsSummary }     from '../components/News/NewsSummary'
 import { ArticleCard }     from '../components/News/ArticleCard'
 import { NewsStats }       from '../components/News/NewsStats'
+import { useEffect, useRef } from 'react'                       // NEW
+import { useSearchParams }   from 'react-router-dom'            // NEW
+
 
 export default function NewsPage() {
+  const [searchParams] = useSearchParams()   // NEW  
+  const searchedRef    = useRef(false)        // prevent double-search in StrictMode
+
   const {
     topic, setTopic,
     category, setCategory,
@@ -12,6 +18,18 @@ export default function NewsPage() {
     articles, summary, loading, streaming, error, searched,
     search, reset,
   } = useNews()
+
+  // NEW: pre-fill from URL params and auto-search
+  useEffect(() => {
+    const topicParam    = searchParams.get('topic')
+    const categoryParam = searchParams.get('category')
+    if (!topicParam || searchedRef.current) return
+    searchedRef.current = true
+    setTopic(topicParam)
+    if (categoryParam) setCategory(categoryParam)
+    // Small delay so setTopic/setCategory state updates propagate before search
+    setTimeout(() => search(), 200)
+  }, [searchParams, setTopic, setCategory, search])
 
   return (
     <div className="news-page">
@@ -58,7 +76,7 @@ export default function NewsPage() {
         <NewsEmptyState />
       )}
 
-      {/* ── Results: summary + article list ── */}
+      {/* ── Results: summary  article list ── */}
       {(searched || loading) && (
         <div className="news-results-layout">
 
@@ -123,7 +141,7 @@ function NewsEmptyState() {
           { icon: '⚡', text: 'Real-time news via Tavily search' },
           { icon: '✦',  text: 'Structured AI briefing — 5 sections' },
           { icon: '🔗', text: 'Linked source articles with relevance scores' },
-          { icon: '🗂',  text: '9 category filters + date range control' },
+          { icon: '🗂',  text: '9 category filters  date range control' },
         ].map(f => (
           <div key={f.text} className="news-empty-feature">
             <span className="news-empty-feature-icon">{f.icon}</span>

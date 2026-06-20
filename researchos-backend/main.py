@@ -338,6 +338,21 @@ async def history(current_user: CurrentUser):
     return {"runs": get_history(limit=50, user_id=current_user["id"])}
 
 
+@app.get("/api/history/search")
+async def search_history(
+    q:            str = Query(..., min_length=2, max_length=200),
+    current_user: CurrentUser = None,
+    limit:        int = Query(default=20, ge=1, le=50),
+):
+    """
+    Full-text search over research history.
+    Searches both topic AND report content.
+    Returns lightweight rows with excerpt (no full report text).
+    """
+    results = database.search_runs(current_user["id"], q, limit=limit)
+    return {"results": results, "query": q, "count": len(results)}
+
+
 @app.get("/api/history/{run_id}")
 async def get_run_route(run_id: int, current_user: CurrentUser):
     run = get_run(run_id)
@@ -390,6 +405,8 @@ async def export_run(run_id: int, current_user: CurrentUser):
         media_type = "text/markdown",
         headers    = {"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
 
 
 # ── Background text ingestion helper ──────────────────────────────────────────
@@ -1347,6 +1364,112 @@ async def get_related_content(run_id: int, current_user: CurrentUser):
         "related_rag_sessions": related_rag,
         "related_news_topics":  related_news,
     }
+
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# GLOBAL SEARCH
+# Fans out to all feature data and returns grouped results.
+# Used by the CommandPalette (Cmd+K) built on Day 4.
+# ══════════════════════════════════════════════════════════════════════════════
+
+@app.get("/api/search")
+async def global_search(
+    q:            str = Query(..., min_length=2, max_length=200),
+    current_user: CurrentUser = None,
+):
+    """
+    Search across all ResearchOS features in one call.
+    Returns results grouped by type: research, pdf, news, workspaces.
+
+    Query params:
+        q: search string (minimum 2 chars)
+
+    Response shape:
+        {
+          query: str,
+          total: int,
+          results: {
+            research:   [{id, title, subtitle, url}],
+            pdf:        [{id, title, subtitle, url}],
+            news:       [{id, title, subtitle, url}],
+            workspaces: [{id, title, subtitle, url}],
+          }
+        }
+    """
+    uid = current_user["id"]
+    kw  = q.lower().strip()
+
+    # ── Research runs (DB) ─────────────────────────────────────────────────────
+    all_runs = get_history(limit=100, user_id=uid)
+    run_results = [
+        {
+            "type":     "research",
+            "id":       r["id"],
+            "title":    r["topic"],
+            "subtitle": f"{r.get('word_count', 0)} words · score {r.get('score') or '?'}/10",
+            "url":      f"/research?run_id={r['id']}",
+        }
+        for r in all_runs
+        if kw in r["topic"].lower()
+    ][:6]
+
+    # ── RAG sessions (in-memory dict) ───────────────────────────────────────────
+    pdf_results = [
+        {
+            "type":     "pdf",
+            "id":       sid,
+            "title":    s.get("filename", "Untitled"),
+            "subtitle": f"{s.get('chunk_count', 0)} chunks · {s.get('source_type', 'pdf')}",
+            "url":      f"/pdf-chat?session={sid}",
+        }
+        for sid, s in _rag_sessions.items()
+        if s.get("user_id") == uid
+        and kw in (s.get("filename") or "").lower()
+        and s.get("status") == "ready"
+    ][:6]
+
+    # ── Tracked news topics (DB) ─────────────────────────────────────────────────
+    tracked   = database.get_tracked_topics(uid)
+    news_results = [
+        {
+            "type":     "news",
+            "id":       t["id"],
+            "title":    t["topic"],
+            "subtitle": f"Tracked · {t['category']}",
+            "url":      f"/news?topic={t['topic']}&category={t['category']}",
+        }
+        for t in tracked
+        if kw in t["topic"].lower()
+    ][:6]
+
+    # ── Workspaces (DB) ───────────────────────────────────────────────────────
+    workspaces  = database.get_workspaces(uid)
+    ws_results  = [
+        {
+            "type":     "workspace",
+            "id":       w["id"],
+            "title":    w["name"],
+            "subtitle": w["topic"],
+            "url":      f"/workspace/{w['id']}",
+        }
+        for w in workspaces
+        if kw in w["name"].lower() or kw in w["topic"].lower()
+    ][:6]
+
+    total = len(run_results) + len(pdf_results) + len(news_results) + len(ws_results)
+
+    return {
+        "query":   q,
+        "total":   total,
+        "results": {
+            "research":   run_results,
+            "pdf":        pdf_results,
+            "news":       news_results,
+            "workspaces": ws_results,
+        },
+    }
+
 
 if __name__ == "__main__":
     port   = int(os.getenv("PORT", 8000))          # Render sets PORT=10000

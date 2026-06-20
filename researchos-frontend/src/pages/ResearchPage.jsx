@@ -1,68 +1,99 @@
-import { useCallback } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { useSearchParams, useNavigate } from 'react-router-dom'  // NEW
 import TopicInput   from '../components/Research/TopicInput'
 import PipelineFlow from '../components/Research/PipelineFlow'
 import ExecutionLog from '../components/Research/ExecutionLog'
 import ReportViewer from '../components/Research/ReportViewer'
 import { useSSEStream } from '../hooks/useSSEStream'
+import { useWorkspace } from '../context/WorkspaceContext'  // NEW
+import api from '../services/api'  // NEW — for loading old runs
+
+const BASE_URL = import.meta.env.VITE_API_URL ?? ''
 
 export default function ResearchPage() {
+  const [searchParams] = useSearchParams()  // NEW
+  const navigate       = useNavigate()       // NEW
+  const { activeWorkspace } = useWorkspace() // NEW
+  const startedRef = useRef(false)           // prevents double-start in StrictMode
+
   const {
     rawLogs, milestones, collapsedMilestoneCount,
     steps, report, feedback,
     runStatus, error, topic, isRunning, isDone,
+    runId, ragSessionId,   // NEW — capture from hook
     start, reset, retry,
   } = useSSEStream()
 
-  const handleStart = useCallback((nextTopic) => start(nextTopic), [start])
-  const handleReset = useCallback(() => reset(), [reset])
+  // ── NEW: Load old run if ?run_id= is in the URL ──────────────────────────
+  const [loadedRun, setLoadedRun] = useState(null)  // holds a fetched historical run
+
+  useEffect(() => {
+    const runIdParam = searchParams.get('run_id')
+    if (!runIdParam) { setLoadedRun(null); return }
+
+    const token = localStorage.getItem('researchos_token')
+    fetch(`${BASE_URL}/api/history/${runIdParam}`, {
+      headers: { Authorization: `Bearer ${token}` }
+    })
+      .then(r => r.json())
+      .then(data => {
+        if (data.id) setLoadedRun(data)
+      })
+      .catch(console.error)
+  }, [searchParams])
+
+  // ── NEW: Auto-start if ?topic= is in the URL ─────────────────────────────
+  useEffect(() => {
+    const topicParam = searchParams.get('topic')
+
+    if (!topicParam) return
+
+    // allow a new URL topic to trigger a new run
+    if (topicParam === topic) return
+
+    startedRef.current = true
+
+    const t = setTimeout(() => {
+      start(topicParam, activeWorkspace?.id ?? null)
+    }, 300)
+
+    return () => clearTimeout(t)
+  }, [searchParams, topic, start, activeWorkspace])
+
+  const handleStart = useCallback(
+    (nextTopic) => start(nextTopic, activeWorkspace?.id ?? null),  // NEW: pass workspace
+    [start, activeWorkspace]
+  )
+  const handleReset = useCallback(() => {
+    reset()
+    setLoadedRun(null)
+    startedRef.current = false
+  }, [reset])
+
+  // Decide what to show in ReportViewer — live run takes priority over loaded run
+  const displayReport   = report   || loadedRun?.report   || ''
+  const displayFeedback = feedback || loadedRun?.feedback || ''
+  const displayTopic    = topic    || loadedRun?.topic    || ''
 
   const completedSteps = Object.values(steps).filter(s => s.status === 'done').length
   const totalSteps     = Object.values(steps).length
-  const reportWords    = report.split(/\s+/).filter(Boolean).length
-  const critiqueWords  = feedback.split(/\s+/).filter(Boolean).length
+  const reportWords    = displayReport.split(/\s+/).filter(Boolean).length
+  const critiqueWords  = displayFeedback.split(/\s+/).filter(Boolean).length
 
   return (
     <div style={{ background: 'var(--bg-base)', color: 'var(--text-primary)', minHeight: '100%' }}>
       <main
         className="research-main-container"
-        style={{
-          maxWidth: '1400px',
-          margin: '0 auto',
-          display: 'grid',
-          gap: '1.25rem',
-          padding: '1.25rem 1.5rem',
-        }}
+        style={{ maxWidth: '1400px', margin: '0 auto', display: 'grid', gap: '1.25rem', padding: '1.25rem 1.5rem' }}
       >
-
-        {/* ── Header ── */}
+        {/* Header — unchanged */}
         <section style={{ paddingTop: '0.25rem', paddingBottom: '0.25rem' }}>
-          <div
-            className="research-header-row"
-            style={{
-              display: 'flex',
-              flexWrap: 'wrap',
-              alignItems: 'flex-end',
-              justifyContent: 'space-between',
-              gap: '1rem',
-            }}
-          >
+          <div className="research-header-row" style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'flex-end', justifyContent: 'space-between', gap: '1rem' }}>
             <div>
-              <p style={{
-                fontSize: 11, fontWeight: 600, textTransform: 'uppercase',
-                letterSpacing: '0.12em', color: 'var(--accent)', fontFamily: 'var(--font-mono)',
-                marginBottom: '0.25rem',
-              }}>
+              <p style={{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.12em', color: 'var(--accent)', fontFamily: 'var(--font-mono)', marginBottom: '0.25rem' }}>
                 Multi-Agent Research
               </p>
-              <h1
-                className="research-title"
-                style={{
-                  fontFamily: 'var(--font-display)', fontWeight: 700,
-                  fontSize: 'clamp(1.3rem, 4vw, 1.85rem)',
-                  letterSpacing: '-0.03em', color: 'var(--text-primary)',
-                  margin: '0 0 0.3rem',
-                }}
-              >
+              <h1 className="research-title" style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 'clamp(1.3rem, 4vw, 1.85rem)', letterSpacing: '-0.03em', color: 'var(--text-primary)', margin: '0 0 0.3rem' }}>
                 Research Workspace
               </h1>
               <p style={{ maxWidth: '480px', fontSize: 13.5, color: 'var(--text-muted)', lineHeight: 1.6, margin: 0 }}>
@@ -73,61 +104,41 @@ export default function ResearchPage() {
           </div>
         </section>
 
-        {/* ── Metrics — responsive 3-col or 1-col ── */}
-        <section
-          className="research-metrics-grid"
-          style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(3, 1fr)',
-            gap: '0.75rem',
-          }}
-        >
-          <MetricCard label="Pipeline"  value={`${completedSteps}/${totalSteps}`}                               detail="stages completed" />
-          <MetricCard label="Report"    value={reportWords   ? reportWords.toLocaleString()   : '0'}            detail="words generated"  />
-          <MetricCard label="Critique"  value={critiqueWords ? critiqueWords.toLocaleString() : '0'}            detail="review words"      />
+        {/* Metrics — unchanged */}
+        <section className="research-metrics-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '0.75rem' }}>
+          <MetricCard label="Pipeline" value={`${completedSteps}/${totalSteps}`} detail="stages completed" />
+          <MetricCard label="Report"   value={reportWords   ? reportWords.toLocaleString()   : '0'} detail="words generated" />
+          <MetricCard label="Critique" value={critiqueWords ? critiqueWords.toLocaleString() : '0'} detail="review words" />
         </section>
 
-        {/* ── Error banner ── */}
         {error && (
-          <div role="alert" style={{
-            borderRadius: 8, border: '1px solid #fecaca', background: '#fef2f2',
-            padding: '10px 14px', fontSize: 13, fontWeight: 500, color: '#dc2626',
-          }}>
+          <div role="alert" style={{ borderRadius: 8, border: '1px solid #fecaca', background: '#fef2f2', padding: '10px 14px', fontSize: 13, fontWeight: 500, color: '#dc2626' }}>
             {error}
           </div>
         )}
 
-        {/* ── Topic input ── */}
         <TopicInput
           onStart={handleStart}
           onClear={handleReset}
           onRetry={retry}
           canRetry={runStatus === 'failed'}
           isRunning={isRunning}
-          currentTopic={topic}
+          currentTopic={displayTopic}
         />
 
-        {/* ── Pipeline flow — horizontally scrollable on mobile ── */}
         <div className="pipeline-flow-container" style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
           <PipelineFlow steps={steps} />
         </div>
 
-        {/* ── Report + Log — stacks to 1-col on mobile ── */}
-        <div
-          className="research-bottom-grid"
-          style={{
-            display: 'grid',
-            gridTemplateColumns: 'minmax(0,1fr) 420px',
-            gap: '1.25rem',
-            alignItems: 'start',
-          }}
-        >
+        <div className="research-bottom-grid" style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) 420px', gap: '1.25rem', alignItems: 'start' }}>
           <ReportViewer
-            report={report}
-            feedback={feedback}
+            report={displayReport}
+            feedback={displayFeedback}
             status={runStatus}
             error={error}
-            topic={topic}
+            topic={displayTopic}
+            runId={runId || loadedRun?.id}
+            ragSessionId={ragSessionId}
           />
           <div className="execution-log-panel">
             <ExecutionLog
@@ -141,29 +152,17 @@ export default function ResearchPage() {
 
       </main>
 
-      {/* Inline responsive overrides for JS-controlled grid values */}
       <style>{`
         @media (max-width: 768px) {
-          .research-metrics-grid {
-            grid-template-columns: 1fr !important;
-          }
-          .research-bottom-grid {
-            grid-template-columns: 1fr !important;
-          }
-          .research-main-container {
-            padding: 12px !important;
-          }
-        }
-        @media (max-width: 480px) {
-          .research-metrics-grid {
-            grid-template-columns: repeat(3, 1fr) !important;
-            gap: 0.5rem !important;
-          }
+          .research-metrics-grid { grid-template-columns: 1fr !important; }
+          .research-bottom-grid  { grid-template-columns: 1fr !important; }
+          .research-main-container { padding: 12px !important; }
         }
       `}</style>
     </div>
   )
 }
+
 
 function RunStatusBadge({ status, isDone }) {
   const labels = {

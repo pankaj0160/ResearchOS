@@ -8,6 +8,7 @@ import './mobile-responsive.css'
 
 import { AuthProvider, useAuth }   from './context/AuthContext'
 import { ThemeProvider }           from './context/ThemeProvider'
+import { WorkspaceProvider }       from './context/WorkspaceContext'
 
 // Layout
 import AppShell                    from './components/Layout/AppShell'
@@ -90,9 +91,11 @@ ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
     <ThemeProvider>
       <AuthProvider>
+        <WorkspaceProvider>   {/* must be inside AuthProvider */}
         <BrowserRouter>
           <App />
         </BrowserRouter>
+        </WorkspaceProvider>   {/* must be inside AuthProvider */}
       </AuthProvider>
     </ThemeProvider>
   </React.StrictMode>

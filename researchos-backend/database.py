@@ -806,3 +806,68 @@ def delete_rag_session_db(session_id: str) -> bool:
     
 
 
+
+
+
+# ── Research History — Full Text Search ───────────────────────────────────────
+# Uses PostgreSQL's native tsvector for full-text search on Supabase.
+# Falls back to simple LIKE search for SQLite (local dev).
+# Returns lightweight summary rows — no full report text (too large).
+
+def search_runs(
+    user_id: int,
+    query: str,
+    limit: int = 20,
+) -> list[dict]:
+    """
+    Full-text search over research run topics and report content.
+
+    Args:
+        user_id: only return runs belonging to this user
+        query:   search string
+        limit:   max results (default 20)
+
+    Returns:
+        List of dicts with: id, topic, score, word_count,
+        source_count, created_at, excerpt (first 300 chars of report)
+    """
+    if not query or not query.strip():
+        return []
+
+    q = query.strip()
+
+    if USE_POSTGRES:
+        # PostgreSQL full-text search using plainto_tsquery
+        # plainto_tsquery handles multi-word phrases and ignores punctuation
+        # ts_rank orders results by relevance
+        sql = """
+            SELECT
+                id, topic, score, word_count, source_count, created_at,
+                LEFT(report, 300) AS excerpt,
+                ts_rank(
+                    to_tsvector('english', COALESCE(topic,'') || ' ' || COALESCE(report,'')),
+                    plainto_tsquery('english', %s)
+                ) AS rank
+            FROM runs
+            WHERE
+                user_id = %s
+                AND to_tsvector('english', COALESCE(topic,'') || ' ' || COALESCE(report,''))
+                    @@ plainto_tsquery('english', %s)
+            ORDER BY rank DESC, created_at DESC
+            LIMIT %s
+        """
+        with _conn() as con:
+            cur = con.cursor()
+            cur.execute(sql, (q, user_id, q, limit))
+            return _fetchall(cur)
+    else:
+        # SQLite fallback: simple LIKE on both topic and report
+        sql = ("SELECT id, topic, score, word_count, source_count, created_at, "
+               "substr(report, 1, 300) AS excerpt "
+               "FROM runs WHERE user_id = ? AND (topic LIKE ? OR report LIKE ?) "
+               "ORDER BY created_at DESC LIMIT ?")
+        with _conn() as con:
+            cur = con.cursor()
+            like = f"%{q}%"
+            cur.execute(sql, (user_id, like, like, limit))
+            return _fetchall(cur)

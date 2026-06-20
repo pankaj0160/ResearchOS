@@ -1,8 +1,10 @@
 import { memo, useCallback, useMemo, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import { useNavigate } from 'react-router-dom'   // NEW
 
-function ReportViewer({ report, feedback, status, error, topic }) {
+function ReportViewer({ report, feedback, status, error, topic, runId, ragSessionId, }) {
+  const navigate = useNavigate()  // NEW
   const [copied, setCopied] = useState(false)
   const hasReport = report.trim().length > 0
   const hasFeedback = feedback.trim().length > 0
@@ -10,8 +12,8 @@ function ReportViewer({ report, feedback, status, error, topic }) {
     if (!hasFeedback) return report
     return `${report.trim()}\n\n---\n\n## Critic Review\n\n${feedback.trim()}\n`
   }, [feedback, hasFeedback, report])
-  const wordCount = useMemo(() => report.split(/\s+/).filter(Boolean).length, [report])
-  const feedbackWordCount = useMemo(() => feedback.split(/\s+/).filter(Boolean).length, [feedback])
+  const wordCount = useMemo(() => report.split(/\s /).filter(Boolean).length, [report])
+  const feedbackWordCount = useMemo(() => feedback.split(/\s /).filter(Boolean).length, [feedback])
 
   const copyReport = useCallback(async () => {
     if (!hasReport) return
@@ -59,6 +61,25 @@ function ReportViewer({ report, feedback, status, error, topic }) {
           >
             Download
           </button>
+
+
+          {/* NEW: Chat with this report button — only shows when ragSessionId is ready */}
+          {ragSessionId && (
+            <button
+              type="button"
+              onClick={() => navigate(`/pdf-chat?session=${ragSessionId}`)}
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: 6,
+                padding: '6px 14px', borderRadius: 12,
+                background: 'rgba(99,102,241,0.12)',
+                border: '1px solid rgba(99,102,241,0.35)',
+                color: '#818cf8', fontSize: 13, fontWeight: 600,
+                cursor: 'pointer', whiteSpace: 'nowrap',
+              }}
+            >
+              💬 Chat with this report
+            </button>
+          )}
         </div>
       </div>
 
@@ -158,7 +179,7 @@ function emptyMessage(status) {
 }
 
 function slugify(value) {
-  return value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '') || 'orchestrai-report'
+  return value.toLowerCase().replace(/[^a-z0-9] /g, '-').replace(/(^-|-$)/g, '') || 'orchestrai-report'
 }
 
 export default memo(ReportViewer)

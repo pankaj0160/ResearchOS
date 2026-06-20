@@ -13,6 +13,7 @@ async function request(path, options = {}) {
   return data
 }
 
+
 export const authApi = {
   register: (email, username, password) =>
     request('/api/auth/register', {
@@ -41,5 +42,23 @@ export const authApi = {
   me: (token) =>
     request('/api/auth/me', {
       headers: { Authorization: `Bearer ${token}` },
+    }),
+
+  /**
+   * GET /api/auth/me with city + default_topic
+   */
+  getProfile: (token) =>
+    request('/api/auth/me', {
+      headers: { Authorization: `Bearer ${token}` },
+    }),
+
+  /**
+   * PATCH /api/auth/me
+   */
+  updateProfile: (token, updates) =>
+    request('/api/auth/me', {
+      method: 'PATCH',
+      headers: { Authorization: `Bearer ${token}` },
+      body: JSON.stringify(updates),
     }),
 }

@@ -1,0 +1,947 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Ram Chai Wala — Village Chai Since 1998</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;1,400&family=Inter:wght@400;500&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --amber: #c8883a;
+      --amber-light: #e8a95a;
+      --amber-dim: #7a5533;
+      --bg: #100800;
+      --bg-card: #1e1000;
+      --bg-card2: #2a1600;
+      --text: #f0d5b0;
+      --text-muted: #a07850;
+      --text-faint: #5a3a1a;
+      --border: #3d2200;
+      --green-wa: #25D366;
+    }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      font-family: 'Inter', sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      overflow-x: hidden;
+    }
+
+    /* ── SCROLL REVEAL ── */
+    .reveal {
+      opacity: 0;
+      transform: translateY(32px);
+      transition: opacity 0.7s ease, transform 0.7s ease;
+    }
+    .reveal.visible {
+      opacity: 1;
+      transform: translateY(0);
+    }
+
+    /* ── NAV ── */
+    nav {
+      position: fixed;
+      top: 0; left: 0; right: 0;
+      z-index: 100;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 1rem 2rem;
+      background: rgba(16, 8, 0, 0.85);
+      
+      border-bottom: 0.5px solid var(--border);
+      transition: padding 0.3s;
+    }
+    nav.scrolled { padding: 0.6rem 2rem; }
+    .nav-brand {
+      font-family: 'Playfair Display', serif;
+      font-size: 20px;
+      color: var(--amber);
+      text-decoration: none;
+    }
+    .nav-links { display: flex; gap: 2rem; list-style: none; }
+    .nav-links a {
+      font-size: 13px;
+      color: var(--text-muted);
+      text-decoration: none;
+      letter-spacing: 0.5px;
+      transition: color 0.2s;
+    }
+    .nav-links a:hover { color: var(--text); }
+
+    @media (max-width: 600px) {
+      .nav-links { display: none; }
+    }
+
+    /* ── HERO ── */
+    .hero {
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      padding: 6rem 2rem 4rem;
+      position: relative;
+      overflow: hidden;
+    }
+
+    /* Ambient glow */
+    .hero::before {
+      content: '';
+      position: absolute;
+      width: 600px; height: 600px;
+      border-radius: 50%;
+      background: radial-gradient(circle, rgba(200,136,58,0.08) 0%, transparent 70%);
+      top: 50%; left: 50%;
+      transform: translate(-50%, -50%);
+      animation: pulse-glow 4s ease-in-out infinite;
+    }
+    @keyframes pulse-glow {
+      0%, 100% { transform: translate(-50%, -50%) scale(1); opacity: 1; }
+      50% { transform: translate(-50%, -50%) scale(1.2); opacity: 0.6; }
+    }
+
+    /* Floating particles */
+    .particles { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
+    .particle {
+      position: absolute;
+      width: 2px; height: 2px;
+      background: var(--amber);
+      border-radius: 50%;
+      opacity: 0;
+      animation: float-up linear infinite;
+    }
+    @keyframes float-up {
+      0% { opacity: 0; transform: translateY(0) translateX(0); }
+      10% { opacity: 0.6; }
+      90% { opacity: 0.2; }
+      100% { opacity: 0; transform: translateY(-300px) translateX(var(--drift)); }
+    }
+
+    .hero-eyebrow {
+      font-size: 11px;
+      letter-spacing: 4px;
+      color: var(--amber);
+      text-transform: uppercase;
+      margin-bottom: 1.2rem;
+      position: relative;
+    }
+    .hero-eyebrow::before,
+    .hero-eyebrow::after {
+      content: '—';
+      margin: 0 12px;
+      opacity: 0.4;
+    }
+
+    .hero-title {
+      font-family: 'Playfair Display', serif;
+      font-size: clamp(42px, 8vw, 80px);
+      font-weight: 700;
+      line-height: 1.1;
+      color: var(--text);
+      position: relative;
+      margin-bottom: 0.5rem;
+    }
+    .hero-title em {
+      font-style: italic;
+      color: var(--amber);
+    }
+
+    .hero-subtitle {
+      font-size: 16px;
+      color: var(--text-muted);
+      margin-bottom: 3rem;
+      font-style: italic;
+    }
+
+    /* ── CUP SVG + STEAM ── */
+    .cup-container {
+      position: relative;
+      width: 160px;
+      height: 160px;
+      margin: 0 auto 3rem;
+    }
+    .cup-svg { width: 100%; height: 100%; }
+
+    .steam-path {
+      stroke: var(--amber);
+      stroke-width: 2;
+      stroke-linecap: round;
+      fill: none;
+      opacity: 0;
+      animation: steam-rise 3s ease-in-out infinite;
+    }
+    .steam-path:nth-child(1) { animation-delay: 0s; }
+    .steam-path:nth-child(2) { animation-delay: 0.6s; }
+    .steam-path:nth-child(3) { animation-delay: 1.2s; }
+
+    @keyframes steam-rise {
+      0% { opacity: 0; transform: translateY(4px); stroke-dashoffset: 60; stroke-dasharray: 60; }
+      20% { opacity: 0.8; }
+      80% { opacity: 0.3; }
+      100% { opacity: 0; transform: translateY(-20px); stroke-dashoffset: 0; stroke-dasharray: 60; }
+    }
+
+    .hero-cta {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      background: var(--green-wa);
+      color: #fff;
+      padding: 14px 32px;
+      border-radius: 40px;
+      font-size: 15px;
+      font-weight: 500;
+      text-decoration: none;
+      transition: transform 0.2s, box-shadow 0.2s;
+      box-shadow: 0 0 0 0 rgba(37,211,102,0.4);
+      animation: wa-pulse 2.5s ease-out infinite;
+      margin-bottom: 1rem;
+    }
+    .hero-cta:hover { transform: scale(1.04); }
+    @keyframes wa-pulse {
+      0% { box-shadow: 0 0 0 0 rgba(37,211,102,0.4); }
+      70% { box-shadow: 0 0 0 14px rgba(37,211,102,0); }
+      100% { box-shadow: 0 0 0 0 rgba(37,211,102,0); }
+    }
+
+    .scroll-hint {
+      position: absolute;
+      bottom: 2rem;
+      left: 50%;
+      transform: translateX(-50%);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 6px;
+      color: var(--text-faint);
+      font-size: 11px;
+      letter-spacing: 2px;
+    }
+    .scroll-arrow {
+      width: 20px; height: 20px;
+      border-right: 1.5px solid var(--border);
+      border-bottom: 1.5px solid var(--border);
+      transform: rotate(45deg);
+      animation: bounce-down 1.5s ease-in-out infinite;
+    }
+    @keyframes bounce-down {
+      0%, 100% { transform: rotate(45deg) translateY(0); opacity: 0.3; }
+      50% { transform: rotate(45deg) translateY(4px); opacity: 1; }
+    }
+
+    /* ── STATS STRIP ── */
+    .stats-strip {
+      display: flex;
+      justify-content: center;
+      gap: 0;
+      border-top: 0.5px solid var(--border);
+      border-bottom: 0.5px solid var(--border);
+      background: var(--bg-card);
+      overflow: hidden;
+    }
+    .stat {
+      flex: 1;
+      text-align: center;
+      padding: 1.8rem 1rem;
+      border-right: 0.5px solid var(--border);
+    }
+    .stat:last-child { border-right: none; }
+    .stat-num {
+      font-family: 'Playfair Display', serif;
+      font-size: 32px;
+      color: var(--amber);
+      line-height: 1;
+      margin-bottom: 6px;
+    }
+    .stat-label {
+      font-size: 10px;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      color: var(--text-faint);
+    }
+
+    /* ── SECTIONS ── */
+    section { padding: 5rem 2rem; max-width: 900px; margin: 0 auto; }
+
+    .section-eyebrow {
+      font-size: 10px;
+      letter-spacing: 4px;
+      text-transform: uppercase;
+      color: var(--amber);
+      margin-bottom: 0.6rem;
+    }
+    .section-title {
+      font-family: 'Playfair Display', serif;
+      font-size: clamp(28px, 4vw, 38px);
+      font-weight: 700;
+      color: var(--text);
+      margin-bottom: 2.5rem;
+      line-height: 1.2;
+    }
+
+    /* ── MENU ── */
+    .menu-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+      gap: 14px;
+    }
+    .menu-card {
+      background: var(--bg-card);
+      border: 0.5px solid var(--border);
+      border-radius: 12px;
+      padding: 1.4rem;
+      position: relative;
+      overflow: hidden;
+      cursor: default;
+      transition: border-color 0.3s, transform 0.3s;
+    }
+    .menu-card::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background: radial-gradient(circle at top left, rgba(200,136,58,0.07), transparent 60%);
+      opacity: 0;
+      transition: opacity 0.3s;
+    }
+    .menu-card:hover { border-color: var(--amber); transform: translateY(-3px); }
+    .menu-card:hover::before { opacity: 1; }
+
+    .menu-tag {
+      display: inline-block;
+      font-size: 9px;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      color: var(--amber);
+      background: rgba(200,136,58,0.1);
+      border: 0.5px solid rgba(200,136,58,0.25);
+      border-radius: 4px;
+      padding: 2px 8px;
+      margin-bottom: 10px;
+    }
+    .menu-name {
+      font-family: 'Playfair Display', serif;
+      font-size: 20px;
+      color: var(--text);
+      margin-bottom: 6px;
+    }
+    .menu-desc {
+      font-size: 12px;
+      color: var(--text-faint);
+      line-height: 1.6;
+      margin-bottom: 14px;
+    }
+    .menu-price {
+      font-family: 'Playfair Display', serif;
+      font-size: 24px;
+      color: var(--amber-light);
+    }
+    .menu-price span { font-size: 14px; color: var(--text-faint); font-family: 'Inter', sans-serif; }
+
+    .menu-divider {
+      height: 0.5px;
+      background: linear-gradient(to right, transparent, var(--border), transparent);
+      margin: 3rem 0;
+    }
+
+    .snacks-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+    .snack-pill {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      background: var(--bg-card2);
+      border: 0.5px solid var(--border);
+      border-radius: 50px;
+      padding: 10px 18px;
+      font-size: 14px;
+      color: var(--text-muted);
+      transition: border-color 0.2s, color 0.2s;
+    }
+    .snack-pill:hover { border-color: var(--amber-dim); color: var(--text); }
+    .snack-pill-price { color: var(--amber); font-size: 13px; }
+
+    /* ── STORY ── */
+    .story-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 3rem;
+      align-items: center;
+    }
+    @media (max-width: 620px) { .story-grid { grid-template-columns: 1fr; } }
+
+    .story-text p {
+      font-size: 15px;
+      color: var(--text-muted);
+      line-height: 1.9;
+      margin-bottom: 1rem;
+    }
+    .story-text p strong { color: var(--text); font-weight: 500; }
+
+    .story-quote {
+      position: relative;
+      padding: 1.5rem 1.5rem 1.5rem 2rem;
+      border-left: 2px solid var(--amber);
+      background: var(--bg-card);
+      border-radius: 0 12px 12px 0;
+    }
+    .story-quote::before {
+      content: '"';
+      font-family: 'Playfair Display', serif;
+      font-size: 80px;
+      color: var(--amber);
+      opacity: 0.15;
+      position: absolute;
+      top: -10px; left: 10px;
+      line-height: 1;
+    }
+    .story-quote p {
+      font-family: 'Playfair Display', serif;
+      font-size: 18px;
+      font-style: italic;
+      color: var(--text);
+      line-height: 1.7;
+    }
+    .story-quote cite {
+      display: block;
+      font-size: 12px;
+      color: var(--amber-dim);
+      margin-top: 0.8rem;
+      font-style: normal;
+      letter-spacing: 1px;
+    }
+
+    /* Illustrated cup stats card */
+    .story-visual {
+      background: var(--bg-card);
+      border: 0.5px solid var(--border);
+      border-radius: 16px;
+      padding: 2rem;
+      text-align: center;
+    }
+    .big-num {
+      font-family: 'Playfair Display', serif;
+      font-size: 72px;
+      color: var(--amber);
+      line-height: 1;
+    }
+    .big-label {
+      font-size: 12px;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      color: var(--text-faint);
+      margin-bottom: 2rem;
+    }
+    .mini-stat-row { display: flex; gap: 12px; justify-content: center; }
+    .mini-stat {
+      background: var(--bg-card2);
+      border: 0.5px solid var(--border);
+      border-radius: 10px;
+      padding: 12px 16px;
+      text-align: center;
+    }
+    .mini-stat .n { font-family: 'Playfair Display', serif; font-size: 22px; color: var(--amber-light); }
+    .mini-stat .l { font-size: 10px; color: var(--text-faint); letter-spacing: 1px; text-transform: uppercase; margin-top: 2px; }
+
+    /* ── INFO ── */
+    .info-cards {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 14px;
+    }
+    .info-card {
+      background: var(--bg-card);
+      border: 0.5px solid var(--border);
+      border-radius: 12px;
+      padding: 1.5rem;
+      display: flex;
+      gap: 14px;
+      align-items: flex-start;
+      transition: border-color 0.2s;
+    }
+    .info-card:hover { border-color: var(--amber-dim); }
+    .info-icon {
+      width: 40px; height: 40px;
+      border-radius: 10px;
+      background: rgba(200,136,58,0.1);
+      border: 0.5px solid rgba(200,136,58,0.2);
+      display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0;
+    }
+    .info-icon svg { width: 18px; height: 18px; stroke: var(--amber); fill: none; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+    .info-label { font-size: 10px; letter-spacing: 2px; text-transform: uppercase; color: var(--text-faint); margin-bottom: 4px; }
+    .info-val { font-size: 15px; color: var(--text); font-weight: 500; line-height: 1.5; }
+
+    /* ── MAP PLACEHOLDER ── */
+    .map-box {
+      background: var(--bg-card);
+      border: 0.5px solid var(--border);
+      border-radius: 12px;
+      height: 180px;
+      margin-top: 2rem;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      color: var(--text-faint);
+      font-size: 13px;
+      position: relative;
+      overflow: hidden;
+    }
+    .map-box::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background:
+        repeating-linear-gradient(0deg, transparent, transparent 28px, rgba(255,255,255,0.02) 29px),
+        repeating-linear-gradient(90deg, transparent, transparent 28px, rgba(255,255,255,0.02) 29px);
+    }
+    .map-pin {
+      width: 32px; height: 32px;
+      background: var(--amber);
+      border-radius: 50% 50% 50% 0;
+      transform: rotate(-45deg);
+      animation: pin-bounce 2s ease-in-out infinite;
+    }
+    @keyframes pin-bounce {
+      0%, 100% { transform: rotate(-45deg) translateY(0); }
+      50% { transform: rotate(-45deg) translateY(-6px); }
+    }
+
+    /* ── CTA BANNER ── */
+    .cta-banner {
+      background: var(--bg-card);
+      border-top: 0.5px solid var(--border);
+      border-bottom: 0.5px solid var(--border);
+      padding: 4rem 2rem;
+      text-align: center;
+    }
+    .cta-banner h2 {
+      font-family: 'Playfair Display', serif;
+      font-size: clamp(24px, 4vw, 36px);
+      color: var(--text);
+      margin-bottom: 0.5rem;
+    }
+    .cta-banner p {
+      color: var(--text-muted);
+      font-size: 14px;
+      margin-bottom: 2rem;
+    }
+    .wa-big {
+      display: inline-flex;
+      align-items: center;
+      gap: 12px;
+      background: var(--green-wa);
+      color: #fff;
+      padding: 16px 40px;
+      border-radius: 50px;
+      font-size: 16px;
+      font-weight: 500;
+      text-decoration: none;
+      transition: transform 0.2s, opacity 0.2s;
+      animation: wa-pulse 2.5s ease-out infinite;
+    }
+    .wa-big:hover { transform: scale(1.04); opacity: 0.92; }
+    .wa-big svg { width: 22px; height: 22px; fill: #fff; flex-shrink: 0; }
+
+    /* ── FOOTER ── */
+    footer {
+      padding: 2rem;
+      text-align: center;
+      border-top: 0.5px solid var(--border);
+      color: var(--text-faint);
+      font-size: 12px;
+    }
+    footer span { color: var(--amber); }
+
+    /* ── TICKER ── */
+    .ticker {
+      background: var(--amber);
+      overflow: hidden;
+      white-space: nowrap;
+      padding: 8px 0;
+    }
+    .ticker-inner {
+      display: inline-block;
+      animation: ticker-scroll 20s linear infinite;
+    }
+    .ticker-inner span {
+      font-size: 12px;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      color: var(--bg);
+      margin: 0 3rem;
+      font-weight: 500;
+    }
+    @keyframes ticker-scroll {
+      0% { transform: translateX(0); }
+      100% { transform: translateX(-50%); }
+    }
+
+    /* ── PAGE LOAD ANIMATION ── */
+    .page-loader {
+      position: fixed;
+      inset: 0;
+      background: var(--bg);
+      z-index: 9999;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-direction: column;
+      gap: 1rem;
+      animation: loader-fade 0.5s ease 1.6s forwards;
+    }
+    .loader-text {
+      font-family: 'Playfair Display', serif;
+      font-size: 28px;
+      color: var(--amber);
+    }
+    .loader-dots {
+      display: flex;
+      gap: 8px;
+    }
+    .loader-dot {
+      width: 6px; height: 6px;
+      background: var(--amber);
+      border-radius: 50%;
+      animation: dot-bounce 0.8s ease-in-out infinite;
+    }
+    .loader-dot:nth-child(2) { animation-delay: 0.15s; }
+    .loader-dot:nth-child(3) { animation-delay: 0.3s; }
+    @keyframes dot-bounce {
+      0%, 100% { transform: translateY(0); opacity: 0.3; }
+      50% { transform: translateY(-8px); opacity: 1; }
+    }
+    @keyframes loader-fade {
+      to { opacity: 0; pointer-events: none; }
+    }
+
+    /* Reduced motion */
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- PAGE LOADER -->
+<div class="page-loader" id="loader">
+  <div class="loader-text">☕ BaBa Hotel</div>
+  <div class="loader-dots">
+    <div class="loader-dot"></div>
+    <div class="loader-dot"></div>
+    <div class="loader-dot"></div>
+  </div>
+</div>
+
+<!-- NAV -->
+<nav id="nav">
+  <a href="#" class="nav-brand">Baba Hotel</a>
+  <ul class="nav-links">
+    <li><a href="#menu">Menu</a></li>
+    <li><a href="#story">Our Story</a></li>
+    <li><a href="#visit">Visit Us</a></li>
+    <li><a href="https://wa.me/919999999999">Order</a></li>
+  </ul>
+</nav>
+
+<!-- TICKER -->
+<div class="ticker" style="margin-top: 60px;">
+  <div class="ticker-inner">
+    <span>Fresh Masala Chai</span>
+    <span>·</span>
+    <span>Adrak Wali Chai</span>
+    <span>·</span>
+    <span>Crispy Samosa</span>
+    <span>·</span>
+    <span>Hot Kachori</span>
+    <span>·</span>
+    <span>Est. 1998</span>
+    <span>·</span>
+    <span>Open 7am – 9pm</span>
+    <span>·</span>
+    <!-- duplicate for seamless loop -->
+    <span>Fresh Masala Chai</span>
+    <span>·</span>
+    <span>Adrak Wali Chai</span>
+    <span>·</span>
+    <span>Crispy Samosa</span>
+    <span>·</span>
+    <span>Hot Kachori</span>
+    <span>·</span>
+    <span>Est. 1998</span>
+    <span>·</span>
+    <span>Open 6am – 9pm</span>
+    <span>·</span>
+  </div>
+</div>
+
+<!-- HERO -->
+<div class="hero">
+  <div class="particles" id="particles"></div>
+  <div class="hero-eyebrow">Est. 1998 &nbsp;·&nbsp; Village Chai</div>
+  <h1 class="hero-title">Baba <em>Chai</em> Wala</h1>
+  <p class="hero-subtitle">Har cup mein dil ki baat</p>
+
+  <!-- Animated Cup -->
+  <div class="cup-container">
+    <svg class="cup-svg" viewBox="0 0 160 160" xmlns="http://www.w3.org/2000/svg">
+      <!-- Steam -->
+      <path class="steam-path" d="M55 60 Q48 48 55 38 Q62 28 55 18" />
+      <path class="steam-path" d="M80 55 Q73 43 80 33 Q87 23 80 13" />
+      <path class="steam-path" d="M105 60 Q98 48 105 38 Q112 28 105 18" />
+      <!-- Saucer -->
+      <ellipse cx="80" cy="138" rx="50" ry="8" fill="#2d1600" stroke="#c8883a" stroke-width="0.5"/>
+      <!-- Cup body -->
+      <path d="M42 78 L52 130 L108 130 L118 78 Z" fill="#2a1600" stroke="#c8883a" stroke-width="0.8"/>
+      <!-- Rim -->
+      <rect x="38" y="74" width="84" height="8" rx="4" fill="#c8883a"/>
+      <!-- Handle -->
+      <path d="M118 90 Q142 90 142 108 Q142 126 118 126" stroke="#c8883a" stroke-width="2" fill="none" stroke-linecap="round"/>
+      <!-- Tea surface -->
+      <ellipse cx="80" cy="76" rx="38" ry="5" fill="#b87030" opacity="0.6"/>
+      <!-- Shine -->
+      <ellipse cx="65" cy="75" rx="8" ry="2" fill="#f0a040" opacity="0.15"/>
+    </svg>
+  </div>
+
+  <a href="https://wa.me/919999999999" class="hero-cta">
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="white"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347z"/><path d="M12 0C5.373 0 0 5.373 0 12c0 2.138.563 4.14 1.535 5.876L.057 23.868l6.186-1.457A11.946 11.946 0 0012 24c6.627 0 12-5.373 12-12S18.627 0 12 0zm0 21.818a9.818 9.818 0 01-5.047-1.395l-.361-.214-3.741.881.938-3.637-.236-.374A9.818 9.818 0 1112 21.818z"/></svg>
+    Order on WhatsApp
+  </a>
+
+  <div class="scroll-hint">
+    <span>Scroll</span>
+    <div class="scroll-arrow"></div>
+  </div>
+</div>
+
+<!-- STATS STRIP -->
+<div class="stats-strip">
+  <div class="stat reveal">
+    <div class="stat-num" id="cups-counter">0</div>
+    <div class="stat-label">Cups today</div>
+  </div>
+  <div class="stat reveal">
+    <div class="stat-num">25+</div>
+    <div class="stat-label">Years of chai</div>
+  </div>
+  <div class="stat reveal">
+    <div class="stat-num">4</div>
+    <div class="stat-label">Chai varieties</div>
+  </div>
+  <div class="stat reveal">
+    <div class="stat-num">₹5</div>
+    <div class="stat-label">Starts at</div>
+  </div>
+</div>
+
+<!-- MENU -->
+<section id="menu">
+  <div class="section-eyebrow reveal">What we serve</div>
+  <h2 class="section-title reveal">Our Chai Menu</h2>
+
+  <div class="menu-grid">
+    <div class="menu-card reveal">
+      <div class="menu-tag">Most Loved</div>
+      <div class="menu-name">Masala Chai</div>
+      <div class="menu-desc">Freshly ground ginger, cardamom, clove and black pepper steeped in full-cream milk.</div>
+      <div class="menu-price">₹10 <span>per cup</span></div>
+    </div>
+    <div class="menu-card reveal">
+      <div class="menu-tag">Strong</div>
+      <div class="menu-name">Adrak Chai</div>
+      <div class="menu-desc">Double the ginger for mornings that need a little extra. No nonsense, full flavour.</div>
+      <div class="menu-price">₹10 <span>per cup</span></div>
+    </div>
+    <div class="menu-card reveal">
+      <div class="menu-tag">Light</div>
+      <div class="menu-name">Elaichi Chai</div>
+      <div class="menu-desc">Gentle cardamom brew, perfect for evenings. Light on the senses, rich on taste.</div>
+      <div class="menu-price">₹10 <span>per cup</span></div>
+    </div>
+    <div class="menu-card reveal">
+      <div class="menu-tag">Premium</div>
+      <div class="menu-name">Special Chai</div>
+      <div class="menu-desc">Ram Bhai's secret blend — seven spices, slow-boiled. Recipe not for sale.</div>
+      <div class="menu-price">₹15 <span>per cup</span></div>
+    </div>
+  </div>
+
+  <div class="menu-divider"></div>
+
+  <div class="section-eyebrow reveal">Also available</div>
+  <h3 class="section-title reveal" style="font-size: 24px; margin-bottom: 1.5rem;">Snacks & Bites</h3>
+  <div class="snacks-row">
+    <div class="snack-pill reveal">Samosa <span class="snack-pill-price">₹5</span></div>
+    <div class="snack-pill reveal">Kachori <span class="snack-pill-price">₹5</span></div>
+    <div class="snack-pill reveal">Bread Pakoda <span class="snack-pill-price">₹10</span></div>
+    <div class="snack-pill reveal">Biscuit <span class="snack-pill-price">₹2</span></div>
+    <div class="snack-pill reveal">Namkeen <span class="snack-pill-price">₹5</span></div>
+  </div>
+</section>
+
+<!-- STORY -->
+<section id="story">
+  <div class="section-eyebrow reveal">Since 1998</div>
+  <h2 class="section-title reveal">The Story of Ram Bhai</h2>
+  <div class="story-grid">
+    <div class="story-text reveal">
+      <p>More than 25 years ago, <strong>Ram Bhai</strong> set up a small stall near the bus stand with nothing but a stove, a kettle, and a recipe passed down from his mother.</p>
+      <p>Today, that same stall is where the village meets. Farmers, students, teachers — everyone starts their day here. <strong>Same spot. Same taste.</strong></p>
+      <p>No machines, no packets. Every cup is brewed fresh, with full-cream milk from the local dairy and spices ground by hand each morning.</p>
+      <div class="story-quote" style="margin-top: 2rem;">
+        <p>Chai sirf peeni nahi hoti, mehsoos bhi karni hoti hai.</p>
+        <cite>— Ansh Bhai, Stall Owner</cite>
+      </div>
+    </div>
+    <div class="story-visual reveal">
+      <div class="big-num" id="years-count">0</div>
+      <div class="big-label">Years of brewing</div>
+      <div class="mini-stat-row">
+        <div class="mini-stat">
+          <div class="n">1</div>
+          <div class="l">Location</div>
+        </div>
+        <div class="mini-stat">
+          <div class="n">7</div>
+          <div class="l">Spices</div>
+        </div>
+        <div class="mini-stat">
+          <div class="n">∞</div>
+          <div class="l">Love</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- VISIT -->
+<section id="visit">
+  <div class="section-eyebrow reveal">Find us</div>
+  <h2 class="section-title reveal">Come Visit</h2>
+  <div class="info-cards">
+    <div class="info-card reveal">
+      <div class="info-icon">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12,6 12,12 16,14"/></svg>
+      </div>
+      <div>
+        <div class="info-label">Timing</div>
+        <div class="info-val">7:00 am – 9:00 pm<br><span style="font-size:12px; color: var(--text-faint);">Every day, including Sunday</span></div>
+      </div>
+    </div>
+    <div class="info-card reveal">
+      <div class="info-icon">
+        <svg viewBox="0 0 24 24"><path d="M21 10c0 7-9 13-9 13S3 17 3 10a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+      </div>
+      <div>
+        <div class="info-label">Location</div>
+        <div class="info-val">Near Bus Stand, Dhobisarra<br><span style="font-size:12px; color: var(--text-faint);">Village, Dist. — UP</span></div>
+      </div>
+    </div>
+    <div class="info-card reveal">
+      <div class="info-icon">
+        <svg viewBox="0 0 24 24"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.14 12a19.79 19.79 0 0 1-3-8.59 2 2 0 0 1 1.99-2.18h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L7.91 9.91a16 16 0 0 0 6.18 6.18l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
+      </div>
+      <div>
+        <div class="info-label">WhatsApp Order</div>
+        <div class="info-val">+91 99999 99999<br><span style="font-size:12px; color: var(--text-faint);">Bulk orders welcome</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="map-box reveal">
+    <div class="map-pin"></div>
+    <span>Near the Bus Stand, Village</span>
+  </div>
+</section>
+
+<!-- CTA BANNER -->
+<div class="cta-banner">
+  <h2 class="reveal">Chai mangwao ghar baithe</h2>
+  <p class="reveal">Bulk orders, events, school functions — we deliver.</p>
+  <a href="https://wa.me/919999999999" class="wa-big reveal">
+    <svg viewBox="0 0 24 24"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347z"/><path d="M12 0C5.373 0 0 5.373 0 12c0 2.138.563 4.14 1.535 5.876L.057 23.868l6.186-1.457A11.946 11.946 0 0012 24c6.627 0 12-5.373 12-12S18.627 0 12 0zm0 21.818a9.818 9.818 0 01-5.047-1.395l-.361-.214-3.741.881.938-3.637-.236-.374A9.818 9.818 0 1112 21.818z"/></svg>
+    Chat on WhatsApp
+  </a>
+</div>
+
+<!-- FOOTER -->
+<footer>
+  Made with <span>♥</span> for Ansh Kaka — Village Chai Since 1998
+</footer>
+
+<script>
+  // Remove loader
+  window.addEventListener('load', () => {
+    setTimeout(() => {
+      document.getElementById('loader').style.display = 'none';
+    }, 1800);
+  });
+
+  // Sticky nav
+  const nav = document.getElementById('nav');
+  window.addEventListener('scroll', () => {
+    nav.classList.toggle('scrolled', window.scrollY > 60);
+  });
+
+  // Scroll reveal
+  const reveals = document.querySelectorAll('.reveal');
+  const observer = new IntersectionObserver((entries) => {
+    entries.forEach((e, i) => {
+      if (e.isIntersecting) {
+        setTimeout(() => e.target.classList.add('visible'), i * 80);
+        observer.unobserve(e.target);
+      }
+    });
+  }, { threshold: 0.1 });
+  reveals.forEach(el => observer.observe(el));
+
+  // Counter animation
+  function animateCounter(el, target, duration) {
+    let start = 0;
+    const step = Math.ceil(target / (duration / 30));
+    const t = setInterval(() => {
+      start = Math.min(start + step, target);
+      el.textContent = start;
+      if (start >= target) clearInterval(t);
+    }, 30);
+  }
+
+  const cupsEl = document.getElementById('cups-counter');
+  const yearsEl = document.getElementById('years-count');
+  let countersStarted = false;
+  const statsObserver = new IntersectionObserver((entries) => {
+    if (entries[0].isIntersecting && !countersStarted) {
+      countersStarted = true;
+      animateCounter(cupsEl, 247, 1200);
+      animateCounter(yearsEl, 25, 1000);
+    }
+  }, { threshold: 0.3 });
+  statsObserver.observe(document.querySelector('.stats-strip'));
+
+  // Floating particles
+  const container = document.getElementById('particles');
+  for (let i = 0; i < 18; i++) {
+    const p = document.createElement('div');
+    p.className = 'particle';
+    p.style.left = Math.random() * 100 + '%';
+    p.style.bottom = Math.random() * 20 + '%';
+    p.style.animationDuration = (4 + Math.random() * 6) + 's';
+    p.style.animationDelay = (Math.random() * 6) + 's';
+    p.style.setProperty('--drift', (Math.random() * 40 - 20) + 'px');
+    container.appendChild(p);
+  }
+</script>
+</body>
+</html>

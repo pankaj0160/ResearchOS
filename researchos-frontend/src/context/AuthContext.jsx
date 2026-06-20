@@ -6,7 +6,7 @@ const TOKEN_KEY = 'researchos_token'
 const BASE_URL  = import.meta.env.VITE_API_URL ?? ''
 
 export function AuthProvider({ children }) {
-  const [user,    setUser]    = useState(null)
+  const [user, setUser] = useState(null)
   const [loading, setLoading] = useState(true)
 
   // On mount, try to rehydrate session from localStorage
@@ -22,7 +22,7 @@ export function AuthProvider({ children }) {
     })
       .then(r => (r.ok ? r.json() : Promise.reject()))
       .then(data => setUser(data))
-      .catch(() => localStorage.removeItem(TOKEN_KEY))  // stale / invalid token
+      .catch(() => localStorage.removeItem(TOKEN_KEY))
       .finally(() => setLoading(false))
   }, [])
 
@@ -36,11 +36,38 @@ export function AuthProvider({ children }) {
     setUser(null)
   }, [])
 
+  /** Update city and/or default_topic */
+  const updateProfile = useCallback(async (updates) => {
+    const token = localStorage.getItem(TOKEN_KEY)
+    if (!token) return
+
+    await fetch(`${BASE_URL}/api/auth/me`, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify(updates),
+    })
+
+    // Update local state immediately
+    setUser(prev => (prev ? { ...prev, ...updates } : prev))
+  }, [])
+
   /** Return the stored JWT (used by API calls) */
   const getToken = useCallback(() => localStorage.getItem(TOKEN_KEY), [])
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, logout, getToken }}>
+    <AuthContext.Provider
+      value={{
+        user,
+        loading,
+        login,
+        logout,
+        getToken,
+        updateProfile,
+      }}
+    >
       {children}
     </AuthContext.Provider>
   )
