@@ -11,10 +11,12 @@ const NAV = [
   {
     section: 'Workspace',
     items: [
-      { to: '/dashboard', icon: HomeIcon,   label: 'Dashboard' },
-      { to: '/research',  icon: SearchIcon, label: 'Research'  },
-      { to: '/pdf-chat',  icon: FileIcon,   label: 'PDF Chat'  },
-      { to: '/news',      icon: NewsIcon,   label: 'News'      },
+      { to: '/dashboard', icon: HomeIcon,                    label: 'Dashboard' },
+      { to: '/research',  icon: SearchIcon,                  label: 'Research'  },
+      { to: '/pdf-chat',  icon: FileIcon,                    label: 'PDF Chat'  },
+      { to: '/news',      icon: NewsIcon,                    label: 'News'      },
+      { to: '/history',   icon: () => <span>📋</span>,      label: 'History'   },
+      { to: '/calendar',  icon: () => <span>📅</span>,      label: 'Calendar'  },
     ],
   },
 ]

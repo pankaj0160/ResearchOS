@@ -5,6 +5,7 @@ import { SessionSidebar } from '../components/RAG/SessionSidebar'
 import { ChatMessage } from '../components/RAG/ChatMessage'
 import { ChatInput } from '../components/RAG/ChatInput'
 import { useSearchParams } from 'react-router-dom'
+import { MiniHistoryStrip } from '../components/History/MiniHistoryStrip'
 
 /* ─────────────────────────────────────────────────────────────────────────────
    PDFChatPage — Premium redesign
@@ -94,7 +95,9 @@ export default function PDFChatPage() {
 
           {/* Sidebar body — only render full content when open */}
           <div className="pdf-sidebar-body">
+            
             {sidebarOpen ? (
+              <>
               <SessionSidebar
                 session={session}
                 sessions={sessions}
@@ -106,6 +109,9 @@ export default function PDFChatPage() {
                 onDelete={deleteSession}
                 onNewUpload={() => { reset(); setSidebarOpen(true) }}
               />
+              <MiniHistoryStrip feature="pdf" />
+              </>
+              
             ) : (
               /* Collapsed: icon rail — click any item to re-open sidebar */
               <div className="pdf-icon-rail">

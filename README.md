@@ -1,8 +1,6 @@
 
 # ResearchOS
 
-eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiI2YTE0MzQ2ZmU1ZmQ3NGZkYzE5MDU1ZDIiLCJpYXQiOjE3Nzk3MTQ3MjcsImV4cCI6MTc3OTgwMTEyN30.eFyHpBEqycNnEPCcVejjLZrlmDWl5dR0Eq9_umMVqpc
-
 
 ### An operating system for AI research.
 

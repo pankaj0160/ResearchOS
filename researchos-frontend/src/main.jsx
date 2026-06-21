@@ -21,7 +21,8 @@ import LoginPage                   from './pages/LoginPage'
 import RegisterPage                from './pages/RegisterPage'
 import ForgotPasswordPage          from './pages/ForgotPasswordPage'
 import WorkspacePage               from './pages/WorkspacePage'
-
+import HistoryPage                 from './pages/HistoryPage'
+import CalendarPage                from './pages/CalendarPage'
 import ProfilePage                 from './pages/ProfilePage'
 
 // Protected pages
@@ -29,6 +30,7 @@ import AIDashboardPage             from './pages/AIDashboardPage'
 import ResearchPage                from './pages/ResearchPage'
 import PDFChatPage                 from './pages/PDFChatPage'
 import NewsPage                    from './pages/NewsPage'
+
 
 
 // ── Route guards ─────────────────────────────────────────────────────────────
@@ -84,8 +86,9 @@ function App() {
         <Route path="/pdf-chat"  element={<PDFChatPage />}     />
         <Route path="/news"      element={<NewsPage />}        />
         <Route path="/workspace/:id" element={<WorkspacePage />} />
-        <Route path="/workspace/:id" element={<WorkspacePage />} />
         <Route path="/profile"       element={<ProfilePage />}   />
+        <Route path="/history"  element={<HistoryPage />}  />
+        <Route path="/calendar" element={<CalendarPage />} />
        
       </Route>
 

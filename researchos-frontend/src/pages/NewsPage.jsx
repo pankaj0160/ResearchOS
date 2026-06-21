@@ -7,6 +7,7 @@ import { TrackedTopicsSidebar }   from '../components/News/TrackedTopicsSidebar'
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { useSearchParams, useNavigate } from 'react-router-dom'
 import { useAuth }                from '../context/AuthContext'
+import { MiniHistoryStrip } from '../components/History/MiniHistoryStrip'
 
 // ─── tiny helper: read token from localStorage ───────────────────────────────
 const getToken = () => localStorage.getItem('researchos_token') ?? ''
@@ -132,12 +133,7 @@ export default function NewsPage() {
       </div>
 
       {/* ── Two-column layout ── */}
-      <div style={{
-        display: 'grid',
-        gridTemplateColumns: window.innerWidth > 768 ? '1fr 220px' : '1fr',
-        gap: '1.25rem',
-        alignItems: 'start',
-      }}>
+      <div className="news-two-col">
         <div>
           {/* ── Search bar ── */}
           <NewsSearchBar
@@ -249,7 +245,11 @@ export default function NewsPage() {
           )}
         </div>
 
-        <TrackedTopicsSidebar onSelectTopic={handleSelectTracked} />
+        {/* Right column — wraps both sidebar widgets */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+          <TrackedTopicsSidebar onSelectTopic={handleSelectTracked} />
+          <MiniHistoryStrip feature="news" />
+        </div>
       </div>
 
       {/* ── Action bar styles ── */}
@@ -261,6 +261,18 @@ export default function NewsPage() {
           margin: 0 0 1rem;
           padding: 10px 0;
           border-bottom: 1px solid var(--color-border, rgba(0,0,0,0.08));
+        }
+
+        .news-two-col {
+          display: grid;
+          grid-template-columns: 1fr 220px;
+          gap: 1.25rem;
+          align-items: start;
+        }
+        @media (max-width: 768px) {
+          .news-two-col {
+            grid-template-columns: 1fr;
+          }
         }
 
         .news-action-btn {

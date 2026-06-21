@@ -1475,6 +1475,61 @@ async def global_search(
 
 
 
+
+# ── Unified History ────────────────────────────────────────────────────────────
+# Returns last N items from all feature types in one call.
+# Used by HistoryPage tabs and mini-history strips on feature pages.
+# The 'limit' param controls how many per feature (default 5 for mini-strips).
+
+@app.get("/api/history/unified")
+async def unified_history(
+    current_user: CurrentUser,
+    limit: int = Query(default=5, ge=1, le=100),
+    feature: str = Query(default="all"),  # all | research | pdf | news
+):
+    """
+    Unified history endpoint — one call to get last N items from all features.
+    Used by HistoryPage and mini-history strips on feature pages.
+
+    feature param filters to a single feature type:
+      'all'      → returns research + pdf + news + activity
+      'research' → only research runs
+      'pdf'      → only RAG sessions
+      'news'     → only tracked topics
+    """
+    uid = current_user["id"]
+    result: dict = {}
+
+    if feature in ("all", "research"):
+        result["research"] = database.get_history(limit=limit, user_id=uid)
+
+    if feature in ("all", "pdf"):
+        sessions = [
+            {
+                "session_id":  sid,
+                "filename":    s.get("filename", "Untitled"),
+                "status":      s.get("status", "ready"),
+                "source_type": s.get("source_type", "pdf"),
+                "chunk_count": s.get("chunk_count", 0),
+                "created_at":  s.get("created_at", ""),
+            }
+            for sid, s in _rag_sessions.items()
+            if s.get("user_id") == uid and s.get("status") != "error"
+        ]
+        # Sort by created_at desc and take limit
+        sessions.sort(key=lambda x: x.get("created_at", ""), reverse=True)
+        result["pdf"] = sessions[:limit]
+
+    if feature in ("all", "news"):
+        result["news"] = database.get_tracked_topics(uid)[:limit]
+
+    if feature == "all":
+        result["activity"] = database.get_activity(uid, limit=limit)
+
+    return result
+
+
+
 if __name__ == "__main__":
     port   = int(os.getenv("PORT", 8000))          # Render sets PORT=10000
     debug  = os.getenv("RENDER", "") == ""         # True locally, False on Render

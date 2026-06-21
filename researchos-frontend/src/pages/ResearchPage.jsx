@@ -7,7 +7,7 @@ import ReportViewer from '../components/Research/ReportViewer'
 import { RelatedContentPanel } from '../components/Research/RelatedContentPanel'
 import { useSSEStream } from '../hooks/useSSEStream'
 import { useWorkspace } from '../context/WorkspaceContext'  // NEW
-import api from '../services/api'  // NEW — for loading old runs
+import { MiniHistoryStrip } from '../components/History/MiniHistoryStrip'
 
 const BASE_URL = import.meta.env.VITE_API_URL ?? ''
 
@@ -128,6 +128,8 @@ export default function ResearchPage() {
           isRunning={isRunning}
           currentTopic={displayTopic}
         />
+
+        <MiniHistoryStrip feature="research" />
 
         <div className="pipeline-flow-container" style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
           <PipelineFlow steps={steps} />
