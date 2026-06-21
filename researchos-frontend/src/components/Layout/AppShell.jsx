@@ -3,6 +3,8 @@ import { Link, NavLink, Outlet, useNavigate } from 'react-router-dom'
 import { useAuth } from '../../context/AuthContext'
 import { useTheme } from '../../context/ThemeProvider'
 import { CommandPalette } from './CommandPalette'   // NEW
+import { WorkspaceSwitcher }      from './WorkspaceSwitcher'
+import { CreateWorkspaceModal }   from './CreateWorkspaceModal'
 
 const NAV = [
   {
@@ -23,6 +25,7 @@ export default function AppShell() {
   const [collapsed, setCollapsed]       = useState(false)
   const [userMenuOpen, setUserMenuOpen] = useState(false)
   const [paletteOpen,  setPaletteOpen]  = useState(false)  // NEW
+  const [createWsOpen, setCreateWsOpen] = useState(false)
   const userMenuRef = useRef(null)
 
   useEffect(() => {
@@ -201,6 +204,14 @@ export default function AppShell() {
               </>
             )}
           </button>
+
+          {/* NEW: WorkspaceSwitcher */}
+          <WorkspaceSwitcher
+            collapsed={collapsed}
+            onOpenCreate={() => setCreateWsOpen(true)}
+          />  
+
+          
           {NAV.map(group => (
             <div key={group.section}>
               {!collapsed && (
@@ -328,6 +339,20 @@ export default function AppShell() {
                 <div style={{ padding: '4px' }}>
                   <div style={{ height: '1px', background: border, margin: '2px 0' }} />
                   <button
+                    onClick={() => { setUserMenuOpen(false); navigate('/profile') }}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: '10px',
+                      padding: '10px 12px', borderRadius: '8px',
+                      color: text, fontSize: '.9rem', fontWeight: 500,
+                      background: 'transparent', border: 'none', cursor: 'pointer',
+                      width: '100%', textAlign: 'left', transition: 'background .12s',
+                    }}
+                    onMouseEnter={e => { e.currentTarget.style.background = hoverBg }}
+                    onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}
+                  >
+                    ⚙ Settings
+                  </button>
+                  <button
                     onClick={handleLogout}
                     style={{
                       display: 'flex', alignItems: 'center', gap: '10px',
@@ -450,6 +475,12 @@ export default function AppShell() {
       <CommandPalette
         open={paletteOpen}
         onClose={() => setPaletteOpen(false)}
+      />
+
+      {/* NEW: CreateWorkspaceModal */}
+      <CreateWorkspaceModal
+        open={createWsOpen}
+        onClose={() => setCreateWsOpen(false)}
       />
 
     </div>

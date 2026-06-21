@@ -6,9 +6,11 @@ import './mobile-responsive.css'
 
 
 
+
 import { AuthProvider, useAuth }   from './context/AuthContext'
 import { ThemeProvider }           from './context/ThemeProvider'
 import { WorkspaceProvider }       from './context/WorkspaceContext'
+
 
 // Layout
 import AppShell                    from './components/Layout/AppShell'
@@ -18,6 +20,7 @@ import LandingPage                 from './pages/Landing'
 import LoginPage                   from './pages/LoginPage'
 import RegisterPage                from './pages/RegisterPage'
 import ForgotPasswordPage          from './pages/ForgotPasswordPage'
+import WorkspacePage               from './pages/WorkspacePage'
 
 // Protected pages
 import AIDashboardPage             from './pages/AIDashboardPage'
@@ -78,6 +81,7 @@ function App() {
         <Route path="/research"  element={<ResearchPage />}    />
         <Route path="/pdf-chat"  element={<PDFChatPage />}     />
         <Route path="/news"      element={<NewsPage />}        />
+        <Route path="/workspace/:id" element={<WorkspacePage />} />
        
       </Route>
 
