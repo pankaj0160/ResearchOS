@@ -1,3 +1,4 @@
+import { useNavigate } from 'react-router-dom'
 export function HeadlinesFeed({ headlines, loading, error, topic, setTopic, onFetch }) {
   function handleKey(e) {
     if (e.key === 'Enter') onFetch()
@@ -64,31 +65,60 @@ export function HeadlinesFeed({ headlines, loading, error, topic, setTopic, onFe
 }
 
 function HeadlineItem({ headline, index }) {
+  const navigate = useNavigate()
+
   function formatDate(raw) {
     if (!raw) return ''
     try { return new Date(raw).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) }
     catch { return '' }
   }
 
+  const topic = headline.title || ''
+
   return (
-    <a
-      href={headline.url}
-      target="_blank"
-      rel="noopener noreferrer"
-      className="headline-item"
-    >
-      <span className="headline-index">{index + 1}</span>
-      <div className="headline-body">
-        <p className="headline-title">{headline.title}</p>
-        <div className="headline-meta">
+    <div className="headline-item" style={{ display: 'flex', alignItems: 'flex-start', gap: 10, padding: '10px 0', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+      <span className="headline-index" style={{ flexShrink: 0, marginTop: 3 }}>{index + 1}</span>
+      <div style={{ flex: 1, minWidth: 0 }}>
+
+        {/* Title — clicks through to article URL */}
+        <a
+          href={headline.url}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="headline-title"
+          style={{ display: 'block', marginBottom: 4, textDecoration: 'none' }}
+        >
+          {headline.title}
+        </a>
+
+        {/* Meta row */}
+        <div className="headline-meta" style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
           {headline.source && <span className="headline-source">{headline.source}</span>}
-          {headline.published_date && (
-            <span className="headline-date">{formatDate(headline.published_date)}</span>
-          )}
+          {headline.published_date && <span className="headline-date">{formatDate(headline.published_date)}</span>}
+
+          {/* NEW: cross-feature action buttons */}
+          <button
+            onClick={() => navigate(`/news?topic=${encodeURIComponent(topic)}`)}
+            title="Search news on this topic"
+            style={{
+              padding: '2px 8px', fontSize: 10, fontWeight: 600, cursor: 'pointer',
+              background: 'rgba(245,158,11,0.1)', border: '1px solid rgba(245,158,11,0.25)',
+              borderRadius: 5, color: '#fbbf24',
+            }}
+          >📰 More news</button>
+
+          <button
+            onClick={() => navigate(`/research?topic=${encodeURIComponent(topic)}`)}
+            title="Research this topic"
+            style={{
+              padding: '2px 8px', fontSize: 10, fontWeight: 600, cursor: 'pointer',
+              background: 'rgba(99,102,241,0.1)', border: '1px solid rgba(99,102,241,0.25)',
+              borderRadius: 5, color: '#818cf8',
+            }}
+          >🔬 Research</button>
         </div>
       </div>
-      <span className="headline-ext"><ExternalIcon /></span>
-    </a>
+    </div>
   )
 }
 

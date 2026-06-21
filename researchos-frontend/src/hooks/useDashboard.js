@@ -1,9 +1,12 @@
 import { useCallback, useEffect, useState } from 'react'
 import { dashboardApi } from '../services/dashboardApi'
+import { useAuth }       from '../context/AuthContext'
 
 const DEFAULT_CITY = 'Mumbai'
 
 export function useDashboard() {
+  const { user } = useAuth()   // user.city and user.default_topic available here
+
   // ── Weather ──────────────────────────────────────────────────────────────
   const [weatherCity,    setWeatherCity]    = useState(DEFAULT_CITY)
   const [weatherInput,   setWeatherInput]   = useState(DEFAULT_CITY)
@@ -131,11 +134,19 @@ export function useDashboard() {
     })
   }, [chatInput, chatLoading])
 
-  // Auto-load weather + headlines on mount
+  // Auto-load weather + headlines — wait for user object (loaded async by AuthContext)
+  // then use their preferences. Fires with defaults first (fast), re-fires once auth
+  // fetch completes (~200ms later) with the user's real city + topic.
   useEffect(() => {
-    fetchWeather(DEFAULT_CITY)
-    fetchHeadlines('world news')
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+    const city  = user?.city          || DEFAULT_CITY
+    const topic = user?.default_topic || 'world news'
+    fetchWeather(city)
+    fetchHeadlines(topic)
+    // Also sync the input fields so the user sees their preference
+    setWeatherInput(city)
+    setHeadlinesTopic(topic)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.city, user?.default_topic])
 
   return {
     // weather

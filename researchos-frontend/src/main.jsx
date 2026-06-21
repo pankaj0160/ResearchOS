@@ -22,6 +22,8 @@ import RegisterPage                from './pages/RegisterPage'
 import ForgotPasswordPage          from './pages/ForgotPasswordPage'
 import WorkspacePage               from './pages/WorkspacePage'
 
+import ProfilePage                 from './pages/ProfilePage'
+
 // Protected pages
 import AIDashboardPage             from './pages/AIDashboardPage'
 import ResearchPage                from './pages/ResearchPage'
@@ -82,6 +84,8 @@ function App() {
         <Route path="/pdf-chat"  element={<PDFChatPage />}     />
         <Route path="/news"      element={<NewsPage />}        />
         <Route path="/workspace/:id" element={<WorkspacePage />} />
+        <Route path="/workspace/:id" element={<WorkspacePage />} />
+        <Route path="/profile"       element={<ProfilePage />}   />
        
       </Route>
 

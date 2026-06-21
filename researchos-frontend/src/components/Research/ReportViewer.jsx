@@ -26,16 +26,30 @@ function ReportViewer({ report, feedback, status, error, topic, runId, ragSessio
     }
   }, [exportContent, hasReport])
 
-  const downloadReport = useCallback(() => {
-    if (!hasReport) return
-    const blob = new Blob([exportContent], { type: 'text/markdown;charset=utf-8' })
-    const url = URL.createObjectURL(blob)
-    const anchor = document.createElement('a')
-    anchor.href = url
-    anchor.download = `${slugify(topic || 'orchestrai-report')}.md`
-    anchor.click()
+  const downloadReport = useCallback(async () => {
+    if (!runId) {
+      // Fallback: client-side Blob download if no runId yet (streaming)
+      const blob = new Blob([report], { type: 'text/markdown' })
+      const url  = URL.createObjectURL(blob)
+      const a   = document.createElement('a')
+      a.href = url; a.download = 'research-report.md'; a.click()
+      URL.revokeObjectURL(url)
+      return
+    }
+    // Use backend export endpoint — includes both report + feedback
+    const token = localStorage.getItem('researchos_token')
+    const res   = await fetch(`/api/history/${runId}/export`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+    if (!res.ok) return
+    const blob = await res.blob()
+    const cd   = res.headers.get('Content-Disposition') ?? ''
+    const fnMatch = cd.match(/filename="([^"]+)"/)
+    const url  = URL.createObjectURL(blob)
+    const a   = document.createElement('a')
+    a.href = url; a.download = fnMatch?.[1] ?? 'research-report.md'; a.click()
     URL.revokeObjectURL(url)
-  }, [exportContent, hasReport, topic])
+  }, [runId, report])
 
   return (
     <section className="rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">

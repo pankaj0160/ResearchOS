@@ -3,6 +3,7 @@ import { WeatherCard } from '../components/Dashboard/WeatherCard'
 import { TravelSafetyCard } from '../components/Dashboard/TravelSafetyCard'
 import { HeadlinesFeed } from '../components/Dashboard/HeadlinesFeed'
 import { DashboardChat } from '../components/Dashboard/DashboardChat'
+import { ActivityFeed }      from '../components/Dashboard/ActivityFeed'
 
 export default function AIDashboardPage() {
   const {
@@ -151,6 +152,22 @@ export default function AIDashboardPage() {
         error={chatError}
         onSend={sendChat}
       />
+
+      {/* ── NEW: Activity Feed ─────────────────────────────────────────────────── */}
+      <div style={{ marginTop: '1.5rem' }}>
+        <div style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          marginBottom: '10px',
+        }}>
+          <h3 style={{
+            fontSize: 11, fontWeight: 700, textTransform: 'uppercase',
+            letterSpacing: '0.1em', color: '#71717a',
+          }}>Recent Activity</h3>
+          <span style={{ fontSize: 11, color: '#52525b' }}>across all features</span>
+        </div>
+        <ActivityFeed limit={12} />
+      </div>
+
     </div>
   )
 }

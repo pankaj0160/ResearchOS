@@ -74,6 +74,9 @@ from fastapi import (
     status,
 )
 
+
+
+
 from rag import (
     ingest_pdf,
     chat_with_pdf,
@@ -1469,6 +1472,7 @@ async def global_search(
             "workspaces": ws_results,
         },
     }
+
 
 
 if __name__ == "__main__":

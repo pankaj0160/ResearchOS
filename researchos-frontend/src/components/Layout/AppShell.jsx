@@ -5,6 +5,7 @@ import { useTheme } from '../../context/ThemeProvider'
 import { CommandPalette } from './CommandPalette'   // NEW
 import { WorkspaceSwitcher }      from './WorkspaceSwitcher'
 import { CreateWorkspaceModal }   from './CreateWorkspaceModal'
+import { searchApi }              from '../../services/searchApi'
 
 const NAV = [
   {
@@ -27,6 +28,26 @@ export default function AppShell() {
   const [paletteOpen,  setPaletteOpen]  = useState(false)  // NEW
   const [createWsOpen, setCreateWsOpen] = useState(false)
   const userMenuRef = useRef(null)
+
+  // ── History search ────────────────────────────────────────────────────────
+  const [histQuery,   setHistQuery]   = useState('')
+  const [histResults, setHistResults] = useState([])
+  const [histLoading, setHistLoading] = useState(false)
+  const debounceRef = useRef(null)
+
+  useEffect(() => {
+    clearTimeout(debounceRef.current)
+    if (histQuery.length < 2) { setHistResults([]); return }
+    debounceRef.current = setTimeout(async () => {
+      setHistLoading(true)
+      try {
+        const data = await searchApi.history(histQuery)
+        setHistResults(data.results ?? [])
+      } catch (e) { console.error(e) }
+      setHistLoading(false)
+    }, 300)
+    return () => clearTimeout(debounceRef.current)
+  }, [histQuery])
 
   useEffect(() => {
     function handleClickOutside(e) {
@@ -211,7 +232,64 @@ export default function AppShell() {
             onOpenCreate={() => setCreateWsOpen(true)}
           />  
 
-          
+          {/* ── History search ── */}
+          {!collapsed && (
+            <div style={{ padding: '4px 12px 8px' }}>
+              <input
+                value={histQuery}
+                onChange={e => setHistQuery(e.target.value)}
+                placeholder="Search history…"
+                style={{
+                  width: '100%', padding: '7px 10px', fontSize: 12,
+                  background: isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.04)',
+                  border: `1px solid ${isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.10)'}`,
+                  borderRadius: 8,
+                  color: isDark ? '#fafafa' : '#111827',
+                  fontFamily: 'inherit', outline: 'none',
+                  boxSizing: 'border-box',
+                }}
+              />
+              {histLoading && (
+                <p style={{ fontSize: 11, color: textMuted, margin: '4px 0 0' }}>Searching…</p>
+              )}
+              {histQuery.length >= 2 && !histLoading && histResults.length === 0 && (
+                <p style={{ fontSize: 11, color: textMuted, margin: '4px 0 0' }}>
+                  No results for "{histQuery}"
+                </p>
+              )}
+            </div>
+          )}
+
+          {/* ── History search results ── */}
+          {!collapsed && histQuery.length >= 2 && histResults.length > 0 && (
+            <div style={{ padding: '0 8px 8px' }}>
+              {histResults.map(run => (
+                <button
+                  key={run.id}
+                  onClick={() => navigate(`/research?run_id=${run.id}`)}
+                  style={{
+                    display: 'block', width: '100%', textAlign: 'left',
+                    padding: '7px 10px', borderRadius: 8, border: 'none',
+                    background: 'transparent', cursor: 'pointer',
+                    color: text, fontSize: 12,
+                    transition: 'background .12s',
+                  }}
+                  onMouseEnter={e => { e.currentTarget.style.background = hoverBg }}
+                  onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}
+                >
+                  <div style={{ fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {run.topic}
+                  </div>
+                  {run.score != null && (
+                    <div style={{ fontSize: 10, color: textMuted, marginTop: 2 }}>
+                      Score {run.score}
+                    </div>
+                  )}
+                </button>
+              ))}
+            </div>
+          )}
+
           {NAV.map(group => (
             <div key={group.section}>
               {!collapsed && (

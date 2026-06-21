@@ -4,6 +4,7 @@ import TopicInput   from '../components/Research/TopicInput'
 import PipelineFlow from '../components/Research/PipelineFlow'
 import ExecutionLog from '../components/Research/ExecutionLog'
 import ReportViewer from '../components/Research/ReportViewer'
+import { RelatedContentPanel } from '../components/Research/RelatedContentPanel'
 import { useSSEStream } from '../hooks/useSSEStream'
 import { useWorkspace } from '../context/WorkspaceContext'  // NEW
 import api from '../services/api'  // NEW — for loading old runs
@@ -74,6 +75,8 @@ export default function ResearchPage() {
   const displayReport   = report   || loadedRun?.report   || ''
   const displayFeedback = feedback || loadedRun?.feedback || ''
   const displayTopic    = topic    || loadedRun?.topic    || ''
+  const displayRunId    = runId    || loadedRun?.id       || null
+  const displayRagId    = ragSessionId
 
   const completedSteps = Object.values(steps).filter(s => s.status === 'done').length
   const totalSteps     = Object.values(steps).length
@@ -131,15 +134,36 @@ export default function ResearchPage() {
         </div>
 
         <div className="research-bottom-grid" style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) 420px', gap: '1.25rem', alignItems: 'start' }}>
-          <ReportViewer
-            report={displayReport}
-            feedback={displayFeedback}
-            status={runStatus}
-            error={error}
-            topic={displayTopic}
-            runId={runId || loadedRun?.id}
-            ragSessionId={ragSessionId}
-          />
+          {/* Two-column layout: report left, related content right (only when run exists) */}
+          {isDone && displayReport ? (
+            <div style={{
+              display: 'grid',
+              gridTemplateColumns: displayRunId ? '1fr 280px' : '1fr',
+              gap: '1.25rem',
+              alignItems: 'start',
+            }}>
+              <ReportViewer
+                report={displayReport}
+                feedback={displayFeedback}
+                status={runStatus}
+                error={error}
+                topic={displayTopic}
+                runId={displayRunId}
+                ragSessionId={displayRagId}
+              />
+              {displayRunId && <RelatedContentPanel runId={displayRunId} />}
+            </div>
+          ) : (
+            <ReportViewer
+              report={displayReport}
+              feedback={displayFeedback}
+              status={runStatus}
+              error={error}
+              topic={displayTopic}
+              runId={displayRunId}
+              ragSessionId={displayRagId}
+            />
+          )}
           <div className="execution-log-panel">
             <ExecutionLog
               milestones={milestones}
