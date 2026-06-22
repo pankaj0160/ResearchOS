@@ -53,6 +53,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, EmailStr, field_validator
 
+# Import the new auth router
+from routers.auth_router import router as auth_router
+from routers.research_router import router as research_router, set_rag_sessions
+
 import auth
 import database
 from auth import get_current_user
@@ -166,6 +170,10 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# Connect the auth router — all its routes become available under /api/auth/*
+app.include_router(auth_router)
+app.include_router(research_router)
+
 _ORIGINS = [
     "http://localhost:5173",
     "http://localhost:3000",
@@ -203,211 +211,13 @@ async def health():
 
 # ── Auth — Pydantic models ────────────────────────────────────────────────────
 
-class RegisterRequest(BaseModel):
-    email: EmailStr
-    username: str
-    password: str
-
-    @field_validator("username")
-    @classmethod
-    def username_valid(cls, v: str) -> str:
-        v = v.strip()
-        if len(v) < 3:
-            raise ValueError("Username must be at least 3 characters")
-        if len(v) > 30:
-            raise ValueError("Username must be 30 characters or less")
-        if not v.replace("_", "").replace("-", "").isalnum():
-            raise ValueError("Username may only contain letters, numbers, _ and -")
-        return v
-
-    @field_validator("password")
-    @classmethod
-    def password_strong(cls, v: str) -> str:
-        if len(v) < 8:
-            raise ValueError("Password must be at least 8 characters")
-        return v
-
-
-class LoginRequest(BaseModel):
-    email: EmailStr
-    password: str
-
-
-class ForgotPasswordRequest(BaseModel):
-    email: EmailStr
-
-
-class ResetPasswordRequest(BaseModel):
-    token: str
-    new_password: str
-
-    @field_validator("new_password")
-    @classmethod
-    def password_strong(cls, v: str) -> str:
-        if len(v) < 8:
-            raise ValueError("Password must be at least 8 characters")
-        return v
-
 
 # ── Auth — Routes ─────────────────────────────────────────────────────────────
-
-@app.post("/api/auth/register", status_code=status.HTTP_201_CREATED)
-async def register(req: RegisterRequest):
-    if database.get_user_by_email(req.email):
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "An account with that email already exists")
-    if database.get_user_by_username(req.username):
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "That username is already taken")
-
-    user_id = database.create_user(
-        email=req.email,
-        username=req.username,
-        password_hash=auth.hash_password(req.password),
-    )
-    token = auth.create_access_token({"sub": str(user_id)})
-    return {"token": token, "user": {"id": user_id, "email": req.email, "username": req.username}}
-
-
-@app.post("/api/auth/login")
-async def login(req: LoginRequest):
-    user = database.get_user_by_email(req.email)
-    if not user or not auth.verify_password(req.password, user["password_hash"]):
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid email or password")
-    token = auth.create_access_token({"sub": str(user["id"])})
-    return {"token": token, "user": {"id": user["id"], "email": user["email"], "username": user["username"]}}
-
-
-@app.post("/api/auth/forgot-password")
-async def forgot_password(req: ForgotPasswordRequest):
-    user = database.get_user_by_email(req.email)
-    if user:
-        reset_token = secrets.token_urlsafe(32)
-        database.save_reset_token(user["id"], reset_token)
-        # TODO: send email with link: /reset-password?token={reset_token}
-        print(f"[DEV] Reset token for {req.email}: {reset_token}")
-    return {"message": "If that email exists, a reset link has been sent."}
-
-
-@app.post("/api/auth/reset-password")
-async def reset_password(req: ResetPasswordRequest):
-    user_id = database.use_reset_token(req.token)
-    if not user_id:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Invalid or expired reset token")
-    database.update_password(user_id, auth.hash_password(req.new_password))
-    return {"message": "Password updated successfully"}
-
-
-# ── Auth — GET /api/auth/me (UPDATED) ─────────────────────────────────────────
-# Old version only returned id/email/username.
-# New version also returns city and default_topic from the user's profile
-# so the Dashboard can auto-load weather for their city and headlines for their topic.
-
-@app.get("/api/auth/me")
-async def me(current_user: CurrentUser):
-    # Use new get_user_full() which includes profile columns
-    user = database.get_user_full(current_user["id"])
-    if user:
-        return user
-    # Fallback to current_user dict if get_user_full fails for any reason
-    return {
-        "id":            current_user["id"],
-        "email":         current_user["email"],
-        "username":      current_user["username"],
-        "city":          "Mumbai",
-        "default_topic": "technology",
-    }
-
-
-# ── Auth — PATCH /api/auth/me (NEW) ───────────────────────────────────────────
-# Lets users update their city and default_topic from the Profile Settings page.
-
-@app.patch("/api/auth/me")
-async def update_me(body: dict, current_user: CurrentUser):
-    city          = body.get("city")
-    default_topic = body.get("default_topic")
-    if not city and not default_topic:
-        raise HTTPException(422, "Provide city or default_topic to update")
-    database.update_user_profile(
-        current_user["id"],
-        city=city,
-        default_topic=default_topic,
-    )
-    return {"updated": True}
 
 
 # ── Research History ──────────────────────────────────────────────────────────
 
-@app.get("/api/history")
-async def history(current_user: CurrentUser):
-    return {"runs": get_history(limit=50, user_id=current_user["id"])}
 
-
-@app.get("/api/history/search")
-async def search_history(
-    q:            str = Query(..., min_length=2, max_length=200),
-    current_user: CurrentUser = None,
-    limit:        int = Query(default=20, ge=1, le=50),
-):
-    """
-    Full-text search over research history.
-    Searches both topic AND report content.
-    Returns lightweight rows with excerpt (no full report text).
-    """
-    results = database.search_runs(current_user["id"], q, limit=limit)
-    return {"results": results, "query": q, "count": len(results)}
-
-
-@app.get("/api/history/{run_id}")
-async def get_run_route(run_id: int, current_user: CurrentUser):
-    run = get_run(run_id)
-    if not run:
-        raise HTTPException(404, "Run not found")
-    if run.get("user_id") != current_user["id"]:
-        raise HTTPException(403, "Access denied")
-    return run
-
-
-@app.delete("/api/history/{run_id}")
-async def delete_run_route(run_id: int, current_user: CurrentUser):
-    run = get_run(run_id)
-    if not run:
-        raise HTTPException(404, "Run not found")
-    if run.get("user_id") != current_user["id"]:
-        raise HTTPException(403, "Access denied")
-    delete_run(run_id)
-    return {"deleted": True}
-
-
-
-@app.get("/api/history/{run_id}/export")
-async def export_run(run_id: int, current_user: CurrentUser):
-    """Download a past research run as a Markdown file."""
-    from fastapi.responses import Response
-    import re
-
-    run = get_run(run_id)
-    if not run:
-        raise HTTPException(status_code=404, detail="Run not found.")
-    if run.get("user_id") != current_user["id"]:
-        raise HTTPException(status_code=403, detail="Access denied.")
-    if not run.get("report", "").strip():
-        raise HTTPException(status_code=422, detail="This run has no report content to export.")
-
-    topic    = run.get("topic", "research")
-    report   = run.get("report", "").strip()
-    feedback = run.get("feedback", "").strip()
-
-    content = f"# {topic}\n\n{report}"
-    if feedback:
-        content += f"\n\n---\n\n## Critic Review\n\n{feedback}"
-
-    slug     = re.sub(r"[^a-z0-9]+", "-", topic.lower()).strip("-") or "report"
-    filename = f"researchos-{slug}.md"
-
-    return Response(
-        content    = content.encode("utf-8"),
-        media_type = "text/markdown",
-        headers    = {"Content-Disposition": f'attachment; filename="{filename}"'},
-    )
 
 
 
@@ -417,50 +227,6 @@ async def export_run(run_id: int, current_user: CurrentUser):
 # Uses asyncio.create_task() so it runs concurrently after the stream ends.
 # Pattern is identical to _run_ingestion() which handles PDF files.
 
-async def _ingest_text_background(
-    session_id: str,
-    title: str,
-    text: str,
-) -> None:
-    """
-    Background coroutine: ingest plain text into ChromaDB for a RAG session.
-    Updates _rag_sessions[session_id] status when done.
-    Never raises — failures are logged to console only.
-    """
-    loop = asyncio.get_event_loop()
-    try:
-        # run_in_executor so the blocking Chroma/embedding code doesn't block the event loop
-        result = await loop.run_in_executor(
-            None,
-            lambda: ingest_text_content(text, session_id, title),
-        )
-        chunk_count = result.get("chunk_count", 0)
-
-        # Update in-memory session dict
-        if session_id in _rag_sessions:
-            _rag_sessions[session_id].update({
-                "status":      "ready",
-                "chunk_count": chunk_count,
-                "page_count":  1,
-            })
-
-        # Update DB status
-        database.update_rag_session_status(
-            session_id, "ready",
-            page_count=1, chunk_count=chunk_count,
-        )
-        print(f"[TextIngest BG] session={session_id} ready — {chunk_count} chunks")
-
-    except Exception as exc:
-        print(f"[TextIngest BG] session={session_id} failed: {exc}")
-        if session_id in _rag_sessions:
-            _rag_sessions[session_id].update({
-                "status": "error",
-                "error":  str(exc),
-            })
-        database.update_rag_session_status(
-            session_id, "error", error_msg=str(exc)
-        )
 
 
 # ── Research SSE Stream (UPDATED) ─────────────────────────────────────────────
@@ -471,119 +237,6 @@ async def _ingest_text_background(
 #   + logs activity after successful save
 # The SSE streaming loop itself (lines with "yield") is UNCHANGED.
 
-@app.get("/api/research/stream")
-async def research_stream(
-    topic:        str = Query(..., min_length=3, max_length=300),
-    workspace_id: int = Query(default=None),   # NEW — optional workspace linkage
-    current_user: CurrentUser = None,
-):
-    research_limiter.check(current_user["id"])
-    user_id = current_user["id"]
-
-    async def event_stream():
-        report    = ""
-        feedback  = ""
-        last_ping = asyncio.get_event_loop().time()
-
-        try:
-            async for event in run_pipeline_async(topic):
-                now = asyncio.get_event_loop().time()
-                if now - last_ping > 15:
-                    yield f"data: {json.dumps({'type': 'ping'})}\n\n"
-                    last_ping = now
-
-                if event.get("agent") == "writer" and event.get("type") in ("chunk", "streaming"):
-                    report += event.get("msg", "")
-                if event.get("agent") == "critic" and event.get("type") in ("chunk", "streaming"):
-                    feedback += event.get("msg", "")
-
-                yield f"data: {json.dumps(event)}\n\n"
-                last_ping = asyncio.get_event_loop().time()
-
-            if report:
-                # Save the run (now also stores workspace_id, word_count, source_count)
-                run_id = save_run(
-                    topic,
-                    report,
-                    feedback,
-                    user_id=user_id,
-                    workspace_id=workspace_id,  # NEW
-                )
-
-                # ── NEW: Auto-ingest report into RAG as a background task ──────────
-                # Creates a chat session so user can immediately "Chat with this report"
-                # Runs in background — doesn't delay the SSE response
-                rag_session_id = None
-                try:
-                    rag_session_id = str(uuid4())
-                    created_at     = datetime.utcnow().isoformat()
-
-                    # Register session in memory immediately (status=processing)
-                    _rag_sessions[rag_session_id] = {
-                        "user_id":     user_id,
-                        "filename":    f"Research: {topic[:60]}",
-                        "file_path":   None,
-                        "created_at":  created_at,
-                        "history":     [],
-                        "status":      "processing",
-                        "source_type": "research_run",
-                        "run_id":      run_id,
-                    }
-
-                    # Persist to DB (so it survives restarts)
-                    database.save_rag_session(
-                        rag_session_id,
-                        user_id,
-                        f"Research: {topic[:60]}",
-                        source_type="research_run",
-                        run_id=run_id,
-                        workspace_id=workspace_id,
-                    )
-
-                    # Ingest text in background — same executor pattern as _run_ingestion
-                    loop = asyncio.get_event_loop()
-                    asyncio.create_task(
-                        _ingest_text_background(rag_session_id, topic, report)
-                    )
-                except Exception as exc:
-                    print(f"[RAG auto-ingest] Failed to start: {exc}")
-                    rag_session_id = None  # don't send broken id to frontend
-
-                # ── NEW: Log activity ──────────────────────────────────────────────
-                database.log_activity(
-                    user_id,
-                    "research_run",
-                    {
-                        "run_id":        run_id,
-                        "topic":         topic,
-                        "word_count":    len(report.split()),
-                        "rag_session_id": rag_session_id,
-                    },
-                    workspace_id=workspace_id,
-                )
-
-                # Send run_id AND rag_session_id to the frontend
-                yield f"data: {json.dumps({'type': 'saved', 'run_id': run_id, 'rag_session_id': rag_session_id})}\n\n"
-
-            yield f"data: {json.dumps({'type': 'done'})}\n\n"
-
-        except Exception as exc:
-            yield f"data: {json.dumps({'type': 'error', 'msg': str(exc)})}\n\n"
-
-        finally:
-            del report, feedback
-            gc.collect()
-
-    return StreamingResponse(
-        event_stream(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control":     "no-cache, no-transform",
-            "X-Accel-Buffering": "no",
-            "Connection":        "keep-alive",
-            "Transfer-Encoding": "chunked",
-        },
-    )
 
 # ══════════════════════════════════════════════════════════════════════════════
 # RAG
@@ -840,6 +493,10 @@ async def rag_sessions(current_user: CurrentUser):
         if s.get("user_id") == current_user["id"]
     ]
     return {"sessions": user_sessions}
+
+
+# Give the research router access to the shared session dict
+set_rag_sessions(_rag_sessions)
 
 
 @app.post("/api/rag/chat", tags=["RAG"])
@@ -1283,91 +940,6 @@ async def rag_ingest_text(
 # Surfaces cross-feature content related to a research run.
 # Uses keyword matching — no ML, no new dependencies.
 # ══════════════════════════════════════════════════════════════════════════════
-
-@app.get("/api/history/{run_id}/related")
-async def get_related_content(run_id: int, current_user: CurrentUser):
-    """
-    Return content from other features related to this research run.
-
-    Matches by keyword overlap — first 4 significant words of the topic
-    are checked against: other run topics, RAG session filenames,
-    and tracked news topics.
-
-    Returns:
-        related_runs:         other research runs on similar topics
-        related_rag_sessions: PDF/text sessions with similar titles
-        related_news_topics:  tracked news topics matching keywords
-    """
-    # Verify run exists and belongs to this user
-    run = get_run(run_id)
-    if not run:
-        raise HTTPException(404, "Run not found")
-    if run.get("user_id") != current_user["id"]:
-        raise HTTPException(403, "Access denied")
-
-    topic = run["topic"]
-    uid   = current_user["id"]
-
-    # Extract keywords: lowercase words longer than 3 chars, skip stopwords
-    stopwords = {"with", "that", "this", "from", "what", "about", "does", "have"}
-    keywords  = [
-        w.lower() for w in topic.split()
-        if len(w) > 3 and w.lower() not in stopwords
-    ][:5]  # max 5 keywords
-
-    def matches(text: str) -> bool:
-        """True if any keyword appears in text (case-insensitive)."""
-        t = text.lower()
-        return any(kw in t for kw in keywords)
-
-    # Related research runs (from DB)
-    all_runs = get_history(limit=100, user_id=uid)
-    related_runs = [
-        {
-            "id":         r["id"],
-            "topic":      r["topic"],
-            "score":      r.get("score"),
-            "created_at": r.get("created_at"),
-        }
-        for r in all_runs
-        if r["id"] != run_id and matches(r["topic"])
-    ][:5]
-
-    # Related RAG sessions (from in-memory dict)
-    related_rag = [
-        {
-            "session_id":  sid,
-            "filename":   s.get("filename", ""),
-            "source_type": s.get("source_type", "pdf"),
-            "created_at": s.get("created_at"),
-        }
-        for sid, s in _rag_sessions.items()
-        if s.get("user_id") == uid
-        and s.get("status") == "ready"
-        and matches(s.get("filename") or "")
-    ][:5]
-
-    # Related tracked news topics (from DB)
-    all_tracked = database.get_tracked_topics(uid)
-    related_news = [
-        {
-            "id":       t["id"],
-            "topic":    t["topic"],
-            "category": t["category"],
-        }
-        for t in all_tracked
-        if matches(t["topic"])
-    ][:5]
-
-    return {
-        "run_id":              run_id,
-        "topic":               topic,
-        "keywords":            keywords,
-        "related_runs":         related_runs,
-        "related_rag_sessions": related_rag,
-        "related_news_topics":  related_news,
-    }
-
 
 
 # ══════════════════════════════════════════════════════════════════════════════

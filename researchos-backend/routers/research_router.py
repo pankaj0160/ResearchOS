@@ -1,0 +1,398 @@
+"""
+routers/research_router.py
+
+All research pipeline and history routes for ResearchOS.
+Handles: SSE streaming pipeline, research history CRUD, export, related content.
+
+The SSE stream is the most complex route in the project.
+It runs 4 AI agents, streams events live to the browser,
+saves the result, and auto-ingests into RAG — all in one request.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import gc                               # garbage collector — frees memory after heavy pipeline
+import json
+import re
+from datetime import datetime
+from pathlib import Path
+from typing import Annotated
+from uuid import uuid4
+
+from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import Response, StreamingResponse
+
+import database
+from auth import get_current_user
+from database import delete_run, get_history, get_run, save_run
+from pipeline import run_pipeline_async
+from rag import ingest_text_content
+from rate_limit import research_limiter
+
+# ── Create the router ─────────────────────────────────────────────────────────
+# Two prefixes needed here because this router handles TWO url groups:
+#   /api/research/* — the streaming pipeline
+#   /api/history/*  — reading/managing past runs
+# We use prefix="" and write full paths. Cleaner than splitting into two routers.
+
+router = APIRouter(tags=["Research"])
+
+# Shortcut type — reads JWT and returns the current user dict
+CurrentUser = Annotated[dict, Depends(get_current_user)]
+
+
+# ── Shared state — injected from main.py ──────────────────────────────────────
+# _rag_sessions lives in main.py and is shared with the RAG router.
+# We receive it here as a module-level variable set by main.py at startup.
+# This is a pragmatic approach — in Task 1.3 we move it into a shared state file.
+_rag_sessions: dict = {}
+
+def set_rag_sessions(sessions: dict) -> None:
+    """Called by main.py at startup to inject the shared session dict."""
+    global _rag_sessions
+    _rag_sessions = sessions
+
+
+# ── Background helper — ingest report text into ChromaDB ─────────────────────
+# After the pipeline finishes, the report is auto-ingested into RAG
+# so the user can immediately "Chat with this report" without uploading anything.
+# This runs as an asyncio background task — it never blocks the SSE stream.
+
+async def _ingest_text_background(
+    session_id: str,
+    title: str,
+    text: str,
+) -> None:
+    """
+    Background coroutine: ingest plain text into ChromaDB for a RAG session.
+    Updates _rag_sessions[session_id] status when done.
+    Never raises — failures are logged to console only.
+    """
+    loop = asyncio.get_event_loop()
+    try:
+        # run_in_executor moves blocking ChromaDB/embedding code off the event loop
+        # so the server can handle other requests while this runs
+        result = await loop.run_in_executor(
+            None,
+            lambda: ingest_text_content(text, session_id, title),
+        )
+        chunk_count = result.get("chunk_count", 0)
+
+        # Update the in-memory session so /api/rag/status returns "ready"
+        if session_id in _rag_sessions:
+            _rag_sessions[session_id].update({
+                "status":      "ready",
+                "chunk_count": chunk_count,
+                "page_count":  1,
+            })
+
+        # Also persist the status to the database (survives server restarts)
+        database.update_rag_session_status(
+            session_id, "ready",
+            page_count=1, chunk_count=chunk_count,
+        )
+        print(f"[TextIngest BG] session={session_id} ready — {chunk_count} chunks")
+
+    except Exception as exc:
+        print(f"[TextIngest BG] session={session_id} failed: {exc}")
+        if session_id in _rag_sessions:
+            _rag_sessions[session_id].update({
+                "status": "error",
+                "error":  str(exc),
+            })
+        database.update_rag_session_status(
+            session_id, "error", error_msg=str(exc)
+        )
+
+
+# ── GET /api/research/stream ──────────────────────────────────────────────────
+# The heart of ResearchOS. Runs 4 AI agents and streams events live.
+# Uses SSE (Server-Sent Events) — connection stays open, server pushes data.
+
+@router.get("/api/research/stream")
+async def research_stream(
+    topic:        str = Query(..., min_length=3, max_length=300),
+    workspace_id: int = Query(default=None),   # optional — links run to a workspace
+    current_user: CurrentUser = None,
+):
+    # Check rate limit — max 5 research runs per 60 seconds per user
+    research_limiter.check(current_user["id"])
+    user_id = current_user["id"]
+
+    async def event_stream():
+        report    = ""                  # accumulates the writer agent's output
+        feedback  = ""                  # accumulates the critic agent's output
+        last_ping = asyncio.get_event_loop().time()
+
+        try:
+            # run_pipeline_async is an async generator — it yields one event at a time
+            # Each yielded event is immediately sent to the browser as an SSE message
+            async for event in run_pipeline_async(topic):
+                now = asyncio.get_event_loop().time()
+
+                # Send a ping every 15 seconds so the browser connection stays alive
+                # (browsers close SSE connections that are silent for too long)
+                if now - last_ping > 15:
+                    yield f"data: {json.dumps({'type': 'ping'})}\n\n"
+                    last_ping = now
+
+                # Accumulate the report text as it streams in word by word
+                if event.get("agent") == "writer" and event.get("type") in ("chunk", "streaming"):
+                    report += event.get("msg", "")
+
+                # Accumulate the critic's feedback
+                if event.get("agent") == "critic" and event.get("type") in ("chunk", "streaming"):
+                    feedback += event.get("msg", "")
+
+                # Send every event to the browser immediately
+                yield f"data: {json.dumps(event)}\n\n"
+                last_ping = asyncio.get_event_loop().time()
+
+            # Pipeline finished — save the run if we got a report
+            if report:
+                run_id = save_run(
+                    topic,
+                    report,
+                    feedback,
+                    user_id=user_id,
+                    workspace_id=workspace_id,
+                )
+
+                # Auto-ingest the report into RAG as a background task
+                # So the user can immediately "Chat with this report"
+                rag_session_id = None
+                try:
+                    rag_session_id = str(uuid4())
+                    created_at     = datetime.utcnow().isoformat()
+
+                    # Register session in memory immediately (status=processing)
+                    _rag_sessions[rag_session_id] = {
+                        "user_id":     user_id,
+                        "filename":    f"Research: {topic[:60]}",
+                        "file_path":   None,
+                        "created_at":  created_at,
+                        "history":     [],
+                        "status":      "processing",
+                        "source_type": "research_run",
+                        "run_id":      run_id,
+                    }
+
+                    # Persist to DB so it survives server restarts
+                    database.save_rag_session(
+                        rag_session_id,
+                        user_id,
+                        f"Research: {topic[:60]}",
+                        source_type="research_run",
+                        run_id=run_id,
+                        workspace_id=workspace_id,
+                    )
+
+                    # Start background ingestion — does NOT block this SSE response
+                    asyncio.create_task(
+                        _ingest_text_background(rag_session_id, topic, report)
+                    )
+
+                except Exception as exc:
+                    print(f"[RAG auto-ingest] Failed to start: {exc}")
+                    rag_session_id = None   # don't send a broken id to the frontend
+
+                # Log this activity so it shows in the Dashboard activity feed
+                database.log_activity(
+                    user_id,
+                    "research_run",
+                    {
+                        "run_id":         run_id,
+                        "topic":          topic,
+                        "word_count":     len(report.split()),
+                        "rag_session_id": rag_session_id,
+                    },
+                    workspace_id=workspace_id,
+                )
+
+                # Tell the frontend the run is saved and give it the IDs
+                yield f"data: {json.dumps({'type': 'saved', 'run_id': run_id, 'rag_session_id': rag_session_id})}\n\n"
+
+            # Signal the frontend that the stream is completely done
+            yield f"data: {json.dumps({'type': 'done'})}\n\n"
+
+        except Exception as exc:
+            # If anything crashes mid-stream, send an error event to the browser
+            yield f"data: {json.dumps({'type': 'error', 'msg': str(exc)})}\n\n"
+
+        finally:
+            # Free memory held by potentially large report strings
+            del report, feedback
+            gc.collect()
+
+    # Wrap the generator in a StreamingResponse with SSE headers
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control":     "no-cache, no-transform",  # never cache a stream
+            "X-Accel-Buffering": "no",                      # tells nginx not to buffer
+            "Connection":        "keep-alive",               # keep the socket open
+            "Transfer-Encoding": "chunked",                  # send in pieces
+        },
+    )
+
+
+# ── GET /api/history ──────────────────────────────────────────────────────────
+
+@router.get("/api/history")
+async def history(current_user: CurrentUser):
+    # get_history() filters by user_id — users can never see each other's runs
+    return {"runs": get_history(limit=50, user_id=current_user["id"])}
+
+
+# ── GET /api/history/search ───────────────────────────────────────────────────
+# Full-text search across topic AND report content.
+# IMPORTANT: this route must be defined BEFORE /history/{run_id}
+# because FastAPI matches routes top to bottom — "search" would be treated
+# as a run_id integer and fail with a 422 if order is wrong.
+
+@router.get("/api/history/search")
+async def search_history(
+    q:            str = Query(..., min_length=2, max_length=200),
+    current_user: CurrentUser = None,
+    limit:        int = Query(default=20, ge=1, le=50),
+):
+    results = database.search_runs(current_user["id"], q, limit=limit)
+    return {"results": results, "query": q, "count": len(results)}
+
+
+# ── GET /api/history/{run_id} ─────────────────────────────────────────────────
+
+@router.get("/api/history/{run_id}")
+async def get_run_route(run_id: int, current_user: CurrentUser):
+    run = get_run(run_id)
+    if not run:
+        raise HTTPException(404, "Run not found")
+    # Security check — users can only access their own runs
+    if run.get("user_id") != current_user["id"]:
+        raise HTTPException(403, "Access denied")
+    return run
+
+
+# ── DELETE /api/history/{run_id} ──────────────────────────────────────────────
+
+@router.delete("/api/history/{run_id}")
+async def delete_run_route(run_id: int, current_user: CurrentUser):
+    run = get_run(run_id)
+    if not run:
+        raise HTTPException(404, "Run not found")
+    if run.get("user_id") != current_user["id"]:
+        raise HTTPException(403, "Access denied")
+    delete_run(run_id)
+    return {"deleted": True}
+
+
+# ── GET /api/history/{run_id}/export ─────────────────────────────────────────
+# Returns the report as a downloadable .md file.
+# The browser triggers a file download automatically from the Content-Disposition header.
+
+@router.get("/api/history/{run_id}/export")
+async def export_run(run_id: int, current_user: CurrentUser):
+    run = get_run(run_id)
+    if not run:
+        raise HTTPException(404, "Run not found")
+    if run.get("user_id") != current_user["id"]:
+        raise HTTPException(403, "Access denied")
+    if not run.get("report", "").strip():
+        raise HTTPException(422, "This run has no report content to export")
+
+    topic    = run.get("topic", "research")
+    report   = run.get("report", "").strip()
+    feedback = run.get("feedback", "").strip()
+
+    # Build the markdown file content
+    content = f"# {topic}\n\n{report}"
+    if feedback:
+        content += f"\n\n---\n\n## Critic Review\n\n{feedback}"
+
+    # Create a safe filename from the topic — removes special characters
+    slug     = re.sub(r"[^a-z0-9]+", "-", topic.lower()).strip("-") or "report"
+    filename = f"researchos-{slug}.md"
+
+    return Response(
+        content    = content.encode("utf-8"),
+        media_type = "text/markdown",
+        headers    = {"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+# ── GET /api/history/{run_id}/related ────────────────────────────────────────
+# Finds other content related to this research run by keyword overlap.
+# Checks: other research runs, RAG sessions, tracked news topics.
+
+@router.get("/api/history/{run_id}/related")
+async def get_related_content(run_id: int, current_user: CurrentUser):
+    run = get_run(run_id)
+    if not run:
+        raise HTTPException(404, "Run not found")
+    if run.get("user_id") != current_user["id"]:
+        raise HTTPException(403, "Access denied")
+
+    topic = run["topic"]
+    uid   = current_user["id"]
+
+    # Extract meaningful keywords — skip short words and common stopwords
+    stopwords = {"with", "that", "this", "from", "what", "about", "does", "have"}
+    keywords  = [
+        w.lower() for w in topic.split()
+        if len(w) > 3 and w.lower() not in stopwords
+    ][:5]
+
+    def matches(text: str) -> bool:
+        """Returns True if any keyword appears in the text."""
+        t = text.lower()
+        return any(kw in t for kw in keywords)
+
+    # Find related research runs
+    all_runs     = get_history(limit=100, user_id=uid)
+    related_runs = [
+        {
+            "id":         r["id"],
+            "topic":      r["topic"],
+            "score":      r.get("score"),
+            "created_at": r.get("created_at"),
+        }
+        for r in all_runs
+        if r["id"] != run_id and matches(r["topic"])
+    ][:5]
+
+    # Find related RAG sessions (from shared in-memory dict)
+    related_rag = [
+        {
+            "session_id":  sid,
+            "filename":    s.get("filename", ""),
+            "source_type": s.get("source_type", "pdf"),
+            "created_at":  s.get("created_at"),
+        }
+        for sid, s in _rag_sessions.items()
+        if s.get("user_id") == uid
+        and s.get("status") == "ready"
+        and matches(s.get("filename") or "")
+    ][:5]
+
+    # Find related tracked news topics
+    all_tracked  = database.get_tracked_topics(uid)
+    related_news = [
+        {
+            "id":       t["id"],
+            "topic":    t["topic"],
+            "category": t["category"],
+        }
+        for t in all_tracked
+        if matches(t["topic"])
+    ][:5]
+
+    return {
+        "run_id":               run_id,
+        "topic":                topic,
+        "keywords":             keywords,
+        "related_runs":         related_runs,
+        "related_rag_sessions": related_rag,
+        "related_news_topics":  related_news,
+    }
