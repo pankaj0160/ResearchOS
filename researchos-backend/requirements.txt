@@ -69,3 +69,5 @@ pytest-asyncio>=0.23.0
 # transformers
 # langchain-huggingface
 # ragas  ← conflicts with langchain>=0.3, local use only via: pip install ragas==0.1.21
+
+asyncpg

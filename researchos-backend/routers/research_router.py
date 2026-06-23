@@ -46,12 +46,7 @@ CurrentUser = Annotated[dict, Depends(get_current_user)]
 # _rag_sessions lives in main.py and is shared with the RAG router.
 # We receive it here as a module-level variable set by main.py at startup.
 # This is a pragmatic approach — in Task 1.3 we move it into a shared state file.
-_rag_sessions: dict = {}
-
-def set_rag_sessions(sessions: dict) -> None:
-    """Called by main.py at startup to inject the shared session dict."""
-    global _rag_sessions
-    _rag_sessions = sessions
+from routers.rag_router import _rag_sessions, _ingest_text_background
 
 
 # ── Background helper — ingest report text into ChromaDB ─────────────────────
