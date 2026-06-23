@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { API_BASE_URL } from '../services/config.js'
 export const AGENTS = ['search', 'reader', 'writer', 'critic', 'final']
 export const PIPELINE_STEPS = [
   { key: 'search', label: 'Search',          waiting: 'Waiting', running: 'Searching sources',   done: 'Search Agent Completed'  },
@@ -259,7 +260,7 @@ export function useSSEStream() {
     if (token) params.set('token', token)
     if (workspaceId) params.set('workspace_id', String(workspaceId))  // NEW
 
-    const apiBase = import.meta.env.VITE_API_URL || ''
+    const apiBase = API_BASE_URL
     const source  = new EventSource(
       `${apiBase}/api/research/stream?${params.toString()}`,
       { withCredentials: false }

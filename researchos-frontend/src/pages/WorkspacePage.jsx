@@ -3,7 +3,8 @@ import { useParams, useNavigate, Link } from 'react-router-dom'
 import { useAuth }      from '../context/AuthContext'
 import { useWorkspace } from '../context/WorkspaceContext'
 
-const BASE = import.meta.env.VITE_API_URL ?? ''
+import { API_BASE_URL } from '../services/config.js'
+const BASE = API_BASE_URL
 
 export default function WorkspacePage() {
   const { id }                                     = useParams()

@@ -13,7 +13,8 @@ import { MiniHistoryStrip } from '../components/History/MiniHistoryStrip'
 const getToken = () => localStorage.getItem('researchos_token') ?? ''
 
 // ─── API base (Vite env var, falls back to same-origin) ──────────────────────
-const API = import.meta.env.VITE_API_URL ?? ''
+
+import { API_BASE_URL as API } from '../services/config.js'
 
 export default function NewsPage() {
   const [searchParams] = useSearchParams()

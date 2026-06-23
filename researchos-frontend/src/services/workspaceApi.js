@@ -4,7 +4,8 @@
  * Calls: GET/POST/DELETE /api/workspaces
  */
 
-const BASE = import.meta.env.VITE_API_URL ?? ''
+import { API_BASE_URL } from './config.js'
+const BASE = API_BASE_URL
 
 function authHeaders() {
   const token = localStorage.getItem('researchos_token')
