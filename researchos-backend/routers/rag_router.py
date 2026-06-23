@@ -466,3 +466,91 @@ async def rag_ingest_text(
         "status":     "processing",
         "created_at": created_at,
     }
+
+
+
+# ── Session cleanup — fixes the memory leak ───────────────────────────────────
+
+import asyncio as _asyncio
+from datetime import datetime, timezone
+
+async def _cleanup_expired_sessions(
+    max_age_hours: int = 24,
+    interval_seconds: int = 3600,
+) -> None:
+    """
+    Background coroutine that removes old sessions from _rag_sessions every hour.
+
+    WHY THIS WORKS:
+    _rag_sessions is an in-memory dict. If a session stays in memory forever,
+    the server eventually runs out of RAM and crashes (memory leak).
+    This coroutine runs forever in the background — every hour it checks
+    every session and removes ones older than max_age_hours.
+
+    The database record is KEPT — only the in-memory entry is removed.
+    If the user comes back after 24 hours, the session reloads from DB on demand.
+
+    This is called a TTL (Time To Live) pattern — the same thing Redis uses
+    for automatic key expiration.
+    """
+    while True:
+        # Wait first — no cleanup needed right after server starts
+        await _asyncio.sleep(interval_seconds)
+
+        now     = datetime.now(timezone.utc)
+        removed = 0
+        errors  = 0
+
+        # We iterate over a snapshot (list of items) not the dict itself
+        # because we might delete items while iterating — that would raise
+        # RuntimeError: dictionary changed size during iteration
+        for sid, session in list(_rag_sessions.items()):
+            try:
+                created_raw = session.get("created_at", "")
+                if not created_raw:
+                    continue   # no timestamp — skip safely
+
+                # Parse the ISO timestamp stored in created_at
+                # Handle both "2024-01-15T10:30:00" and "2024-01-15T10:30:00+00:00"
+                created_str = str(created_raw).replace("Z", "+00:00")
+                try:
+                    created_at = datetime.fromisoformat(created_str)
+                except ValueError:
+                    continue   # unparseable timestamp — skip safely
+
+                # Make timezone-aware if it isn't already
+                if created_at.tzinfo is None:
+                    created_at = created_at.replace(tzinfo=timezone.utc)
+
+                # Calculate age in hours
+                age_hours = (now - created_at).total_seconds() / 3600
+
+                if age_hours > max_age_hours:
+                    # Only remove sessions that are not currently being processed
+                    # "processing" sessions are mid-upload — never remove those
+                    if session.get("status") != "processing":
+                        del _rag_sessions[sid]
+                        removed += 1
+
+            except Exception as exc:
+                # Never let one bad session crash the entire cleanup loop
+                errors += 1
+                print(f"[Session Cleanup] Error processing session {sid}: {exc}")
+
+        # Log the result — useful for debugging memory issues later
+        if removed > 0 or errors > 0:
+            remaining = len(_rag_sessions)
+            print(
+                f"[Session Cleanup] Removed {removed} expired sessions "
+                f"({errors} errors) — {remaining} remaining in memory"
+            )
+
+
+def start_session_cleanup(app=None) -> None:
+    """
+    Starts the cleanup coroutine as a background asyncio task.
+    Called once from main.py lifespan at startup.
+    asyncio.create_task() runs it concurrently — it never blocks anything.
+    """
+    _asyncio.create_task(_cleanup_expired_sessions())
+    print("[Session Cleanup] Background cleanup task started — runs every hour")

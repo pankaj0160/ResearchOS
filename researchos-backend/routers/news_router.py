@@ -20,6 +20,10 @@ import database
 import dashboard_agent as _dash
 import news as _news_module
 from auth import get_current_user
+from database import (
+    get_tracked_topics_async, track_news_topic_async,
+    delete_tracked_topic_async, log_activity_async,
+)
 
 # ── Router ────────────────────────────────────────────────────────────────────
 router = APIRouter(tags=["News"])
@@ -117,7 +121,7 @@ async def news_summarize(
 @router.get("/api/news/tracked")
 async def get_tracked_topics(current_user: CurrentUser):
     """Return all news topics the user is tracking."""
-    topics = database.get_tracked_topics(current_user["id"])
+    topics = await get_tracked_topics_async(current_user["id"])
     return {"topics": topics}
 
 
@@ -136,7 +140,7 @@ async def track_topic(body: dict, current_user: CurrentUser):
     if not topic:
         raise HTTPException(422, "topic is required")
 
-    tid = database.track_news_topic(current_user["id"], topic, category, wid)
+    tid = await track_news_topic_async(current_user["id"], topic, category, wid)
     return {"tracked": True, "id": tid, "topic": topic, "category": category}
 
 
@@ -145,7 +149,7 @@ async def track_topic(body: dict, current_user: CurrentUser):
 @router.delete("/api/news/tracked/{tid}")
 async def untrack_topic(tid: int, current_user: CurrentUser):
     """Remove a tracked news topic by its ID."""
-    deleted = database.delete_tracked_topic(tid)
+    deleted = await delete_tracked_topic_async(tid)
     if not deleted:
         raise HTTPException(404, "Topic not found")
     return {"deleted": True, "id": tid}

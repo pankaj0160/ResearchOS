@@ -32,6 +32,26 @@ DB_PATH      = Path(__file__).parent / "researchos.db"   # SQLite fallback
 # True = use PostgreSQL, False = use SQLite fallback
 USE_POSTGRES = bool(DATABASE_URL)
 
+# ── Async pool — injected at startup by main.py ───────────────────────────────
+# None until set_async_pool() is called, or in local SQLite mode.
+# The TYPE annotation is a string to avoid importing asyncpg at module level
+# (asyncpg may not be installed in all environments; we import it lazily).
+_async_pool: "asyncpg.Pool | None" = None
+
+
+def set_async_pool(pool) -> None:
+    """
+    Inject the asyncpg connection pool created in main.py's lifespan into
+    this module so async DB functions can use it.
+
+    Called once at startup — after asyncpg.create_pool() succeeds.
+    Never called in local SQLite mode (pool stays None, async functions
+    fall back transparently to their sync counterparts).
+    """
+    global _async_pool
+    _async_pool = pool
+
+
 # ── Schema ────────────────────────────────────────────────────────────────────
 
 # PostgreSQL version — uses SERIAL and %s
@@ -248,46 +268,51 @@ def init_db() -> None:
         print(f"[DB] ResearchOS initialised (SQLite at {DB_PATH})")
 
 
-# ── Runs — Write (UPDATED) ────────────────────────────────────────────────────
-# Changes from original:
-#   + accepts workspace_id parameter
-#   + auto-calculates word_count from report text
-#   + auto-calculates source_count by counting markdown links in report
+# ── Runs — Write ──────────────────────────────────────────────────────────────
 
 def save_run(
     topic: str,
     report: str,
     feedback: str,
     user_id: int | None = None,
-    workspace_id: int | None = None,  # NEW param
+    workspace_id: int | None = None,
 ) -> int:
-    # Extract score from critic feedback (same as before)
+    """
+    Sync version — used as fallback when async pool is unavailable (local dev).
+    Blocks the event loop; prefer save_run_async() in production route handlers.
+    """
     score: float | None = None
     m = re.search(r"Score:\s*(\d+(?:\.\d+)?)/10", feedback, re.IGNORECASE)
     if m:
         score = float(m.group(1))
 
-    # NEW: calculate word count and source count automatically
-    word_count = len(report.split())
+    word_count   = len(report.split())
     source_count = len(re.findall(r'\[.*?\]\(https?://', report))
 
     with _conn() as con:
         cur = con.cursor()
         cur.execute(
             _q(
-                "INSERT INTO runs (topic, report, feedback, score, user_id, workspace_id, word_count, source_count, created_at) "
+                "INSERT INTO runs (topic, report, feedback, score, user_id, workspace_id, "
+                "word_count, source_count, created_at) "
                 "VALUES (?,?,?,?,?,?,?,?,?)"
             ),
-            (topic, report, feedback, score, user_id, workspace_id, word_count, source_count, time.time()),
+            (topic, report, feedback, score, user_id, workspace_id,
+             word_count, source_count, time.time()),
         )
         if USE_POSTGRES:
             cur.execute("SELECT lastval()")
             return cur.fetchone()[0]
         return cur.lastrowid
 
+
 # ── Runs — Read ───────────────────────────────────────────────────────────────
 
 def get_history(limit: int = 50, user_id: int | None = None) -> list[dict]:
+    """
+    Sync version — used as fallback when async pool is unavailable (local dev).
+    Blocks the event loop; prefer get_history_async() in production route handlers.
+    """
     with _conn() as con:
         cur = con.cursor()
         if user_id is not None:
@@ -320,6 +345,136 @@ def delete_run(run_id: int) -> bool:
         cur = con.cursor()
         cur.execute(_q("DELETE FROM runs WHERE id = ?"), (run_id,))
         return cur.rowcount > 0
+
+
+# ── Runs — Async versions (Task 2.3) ─────────────────────────────────────────
+#
+# Pattern: "strangler fig"
+#   Sync versions remain as fallback for local dev / pool unavailable.
+#   Async versions are called by route handlers when the pool is ready.
+#   Over time, sync versions will be replaced entirely (Task 2.4+).
+#
+# asyncpg vs psycopg2 syntax reference:
+#   psycopg2  cur.execute("... WHERE id = %s", (uid,))   → %s placeholders
+#   asyncpg   conn.fetch("... WHERE id = $1", uid)        → $N placeholders
+#
+#   psycopg2  cur.fetchone()[0]   → scalar
+#   asyncpg   conn.fetchval(...)  → scalar (cleaner)
+#
+#   psycopg2  cur.fetchone()      → tuple/Row
+#   asyncpg   conn.fetchrow(...)  → Record (dict-like, read-only)
+#
+#   psycopg2  cur.fetchall()      → list of tuples/Rows
+#   asyncpg   conn.fetch(...)     → list of Records
+#
+# Records must be converted to plain dicts before returning from routes
+# because asyncpg Records are not JSON-serialisable by default.
+
+
+async def save_run_async(
+    topic:        str,
+    report:       str,
+    feedback:     str,
+    user_id:      int | None = None,
+    workspace_id: int | None = None,
+) -> int:
+    """
+    Async version of save_run().
+
+    Saves a completed research run using a pooled async connection so the
+    event loop is never blocked. Falls back to sync save_run() transparently
+    if the pool is not available (local dev / SQLite mode).
+
+    Returns the new run's database id.
+
+    IMPORTANT — caller must be an async function:
+        run_id = await save_run_async(topic, report, feedback, user_id=uid)
+    """
+    if not _async_pool:
+        # Pool not ready — fall back to sync version.
+        # This is intentional: local dev keeps working without asyncpg.
+        return save_run(topic, report, feedback, user_id, workspace_id)
+
+    # Compute derived fields before acquiring the connection to keep
+    # connection hold-time as short as possible.
+    score: float | None = None
+    m = re.search(r"Score:\s*(\d+(?:\.\d+)?)/10", feedback, re.IGNORECASE)
+    if m:
+        score = float(m.group(1))
+
+    word_count   = len(report.split())
+    source_count = len(re.findall(r'\[.*?\]\(https?://', report))
+
+    # acquire() borrows one connection from the pool.
+    # The connection is returned automatically when the block exits —
+    # even if an exception is raised — so no connection leaks.
+    async with _async_pool.acquire() as conn:
+        # fetchval() returns the single scalar from RETURNING id.
+        # $1..$9 are asyncpg's positional parameter style.
+        run_id: int = await conn.fetchval(
+            """
+            INSERT INTO runs
+                (topic, report, feedback, score, user_id, workspace_id,
+                 word_count, source_count, created_at)
+            VALUES
+                ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+            RETURNING id
+            """,
+            topic, report, feedback, score, user_id, workspace_id,
+            word_count, source_count, time.time(),
+        )
+
+    return run_id
+
+
+async def get_history_async(
+    limit:   int = 50,
+    user_id: int | None = None,
+) -> list[dict]:
+    """
+    Async version of get_history().
+
+    Returns recent research runs without blocking the event loop.
+    Falls back to sync get_history() if the pool is not available.
+
+    Columns returned: id, topic, score, word_count, source_count,
+                      created_at, excerpt (first 200 chars of report).
+
+    Note: word_count and source_count are added here vs the sync version
+    because the History page already renders them — no schema change needed,
+    the columns exist on the runs table.
+    """
+    if not _async_pool:
+        return get_history(limit=limit, user_id=user_id)
+
+    async with _async_pool.acquire() as conn:
+        if user_id is not None:
+            rows = await conn.fetch(
+                """
+                SELECT id, topic, score, word_count, source_count, created_at,
+                       SUBSTRING(report, 1, 200) AS excerpt
+                FROM   runs
+                WHERE  user_id = $1
+                ORDER  BY created_at DESC
+                LIMIT  $2
+                """,
+                user_id, limit,
+            )
+        else:
+            rows = await conn.fetch(
+                """
+                SELECT id, topic, score, word_count, source_count, created_at,
+                       SUBSTRING(report, 1, 200) AS excerpt
+                FROM   runs
+                ORDER  BY created_at DESC
+                LIMIT  $1
+                """,
+                limit,
+            )
+
+    # asyncpg Record objects are read-only and not JSON-serialisable.
+    # dict(row) produces a plain {col: value} dict FastAPI can return directly.
+    return [dict(row) for row in rows]
 
 
 # ── Users — Write ─────────────────────────────────────────────────────────────
@@ -471,11 +626,7 @@ def get_support_tickets(limit: int = 100) -> list[dict]:
         return _fetchall(cur)
 
 
-
 # ── User Profile — Read (enhanced) ────────────────────────────────────────────
-# Why: The existing get_user_by_id() doesn't return new profile columns (city,
-# default_topic). This new function returns the full profile including them.
-# Used by the updated /api/auth/me route so the frontend gets city + topic.
 
 def get_user_full(user_id: int) -> dict | None:
     """Return user row including new profile fields (city, default_topic)."""
@@ -489,8 +640,6 @@ def get_user_full(user_id: int) -> dict | None:
 
 
 # ── User Profile — Write ──────────────────────────────────────────────────────
-# Why: Users need to set their city (for weather) and default_topic (for
-# headlines). This is called by PATCH /api/auth/me which you'll add in Step 4.
 
 def update_user_profile(
     user_id: int,
@@ -504,7 +653,7 @@ def update_user_profile(
     if default_topic is not None:
         fields["default_topic"] = default_topic.strip()
     if not fields:
-        return False  # nothing to update
+        return False
 
     fields["updated_at"] = time.time()
     set_clause = ", ".join(f"{k} = ?" for k in fields)
@@ -516,17 +665,9 @@ def update_user_profile(
             (*fields.values(), user_id),
         )
         return cur.rowcount > 0
-    
-
 
 
 # ── Workspaces — Write ────────────────────────────────────────────────────────
-# Why: These are the 4 database operations every workspace API route needs.
-# create = POST /api/workspaces
-# get_workspaces = GET /api/workspaces (list all for user)
-# get_workspace = used to verify ownership before delete
-# delete_workspace = DELETE /api/workspaces/{id}
-# update_workspace = future PATCH support
 
 def create_workspace(
     user_id: int,
@@ -591,18 +732,11 @@ def update_workspace(workspace_id: int, **kwargs) -> bool:
             (*fields.values(), workspace_id),
         )
         return cur.rowcount > 0
-    
-
-
 
 
 # ── Activity Events ───────────────────────────────────────────────────────────
-# Why: log_activity() is called after every major user action (research run,
-# PDF upload, news search, workspace created). It NEVER crashes the caller —
-# activity logging is fire-and-forget. get_activity() powers the Dashboard
-# activity feed that shows what the user has done across all features.
 
-import json as _json  # use alias to avoid conflicts with main.py's json import
+import json as _json  # alias avoids conflict with any caller's `import json`
 
 
 def log_activity(
@@ -612,16 +746,8 @@ def log_activity(
     workspace_id: int | None = None,
 ) -> None:
     """
-    Record a user action in the activity_events table.
-    Fire-and-forget — never raises an exception, so callers always succeed
-    even if activity logging fails.
-
-    event_type examples:
-      'research_run'      payload: {run_id, topic, word_count}
-      'pdf_upload'        payload: {session_id, filename}
-      'news_search'       payload: {topic, category, article_count}
-      'workspace_created' payload: {workspace_id, name, topic}
-      'text_ingested'     payload: {session_id, title}
+    Record a user action in activity_events. Fire-and-forget — never raises,
+    so a logging failure never breaks the feature that triggered it.
     """
     try:
         with _conn() as con:
@@ -634,15 +760,11 @@ def log_activity(
                 (user_id, event_type, _json.dumps(payload), workspace_id, time.time()),
             )
     except Exception as exc:
-        # Log to console but never raise — activity failure must not break features
         print(f"[Activity] Failed to log '{event_type}' for user {user_id}: {exc}")
 
 
 def get_activity(user_id: int, limit: int = 20) -> list[dict]:
-    """
-    Return recent activity events for a user, newest first.
-    Parses payload from JSON string back to dict before returning.
-    """
+    """Return recent activity events for a user, payload parsed to dict."""
     with _conn() as con:
         cur = con.cursor()
         cur.execute(
@@ -655,7 +777,6 @@ def get_activity(user_id: int, limit: int = 20) -> list[dict]:
         )
         rows = _fetchall(cur)
 
-    # Parse payload JSON string → dict (psycopg2 may return it already parsed)
     for row in rows:
         if isinstance(row.get("payload"), str):
             try:
@@ -665,11 +786,7 @@ def get_activity(user_id: int, limit: int = 20) -> list[dict]:
     return rows
 
 
-
 # ── News Tracked Topics ───────────────────────────────────────────────────────
-# Why: Users should be able to save news topics they follow.
-# The UNIQUE constraint means tracking the same topic twice is a no-op
-# (ON CONFLICT DO NOTHING) rather than an error — safe to call repeatedly.
 
 def track_news_topic(
     user_id: int,
@@ -678,9 +795,8 @@ def track_news_topic(
     workspace_id: int | None = None,
 ) -> int:
     """
-    Save a news topic for a user. Safe to call multiple times —
-    UNIQUE(user_id, topic, category) prevents duplicates.
-    Returns the id of the tracked topic row.
+    Save a news topic for a user. UNIQUE(user_id, topic, category) prevents
+    duplicates — safe to call repeatedly without error.
     """
     with _conn() as con:
         cur = con.cursor()
@@ -698,9 +814,9 @@ def track_news_topic(
             row = cur.fetchone()
             return row[0] if row else 0
         else:
-            # SQLite doesn't support ON CONFLICT ... DO NOTHING in the same way
             cur.execute(
-                "INSERT OR IGNORE INTO news_tracked_topics (user_id, topic, category, workspace_id, created_at) VALUES (?,?,?,?,?)",
+                "INSERT OR IGNORE INTO news_tracked_topics "
+                "(user_id, topic, category, workspace_id, created_at) VALUES (?,?,?,?,?)",
                 (user_id, topic.strip(), category.strip(), workspace_id, time.time()),
             )
             return cur.lastrowid or 0
@@ -718,19 +834,14 @@ def get_tracked_topics(user_id: int) -> list[dict]:
 
 
 def delete_tracked_topic(topic_id: int) -> bool:
-    """Remove a tracked topic. Returns True if row was deleted."""
+    """Remove a tracked topic. Returns True if a row was deleted."""
     with _conn() as con:
         cur = con.cursor()
         cur.execute(_q("DELETE FROM news_tracked_topics WHERE id = ?"), (topic_id,))
         return cur.rowcount > 0
-    
 
 
 # ── RAG Sessions — DB persistence ─────────────────────────────────────────────
-# Why: Right now RAG sessions only live in the Python _rag_sessions dict.
-# When the server restarts, all session metadata is lost (users see empty list).
-# These functions persist session metadata to Supabase so sessions survive restarts.
-# NOTE: ChromaDB still stores vectors locally — these functions only handle metadata.
 
 def save_rag_session(
     session_id: str,
@@ -753,7 +864,9 @@ def save_rag_session(
             )
         else:
             cur.execute(
-                "INSERT OR IGNORE INTO rag_sessions (id, user_id, filename, source_type, run_id, workspace_id, created_at) VALUES (?,?,?,?,?,?,?)",
+                "INSERT OR IGNORE INTO rag_sessions "
+                "(id, user_id, filename, source_type, run_id, workspace_id, created_at) "
+                "VALUES (?,?,?,?,?,?,?)",
                 (session_id, user_id, filename, source_type, run_id, workspace_id, time.time()),
             )
 
@@ -780,9 +893,7 @@ def get_all_rag_sessions() -> list[dict]:
     """Return ALL rag sessions (all users). Used on startup to reload into memory dict."""
     with _conn() as con:
         cur = con.cursor()
-        cur.execute(
-            _q("SELECT * FROM rag_sessions ORDER BY created_at DESC")
-        )
+        cur.execute(_q("SELECT * FROM rag_sessions ORDER BY created_at DESC"))
         return _fetchall(cur)
 
 
@@ -803,16 +914,9 @@ def delete_rag_session_db(session_id: str) -> bool:
         cur = con.cursor()
         cur.execute(_q("DELETE FROM rag_sessions WHERE id = ?"), (session_id,))
         return cur.rowcount > 0
-    
-
-
-
 
 
 # ── Research History — Full Text Search ───────────────────────────────────────
-# Uses PostgreSQL's native tsvector for full-text search on Supabase.
-# Falls back to simple LIKE search for SQLite (local dev).
-# Returns lightweight summary rows — no full report text (too large).
 
 def search_runs(
     user_id: int,
@@ -821,15 +925,8 @@ def search_runs(
 ) -> list[dict]:
     """
     Full-text search over research run topics and report content.
-
-    Args:
-        user_id: only return runs belonging to this user
-        query:   search string
-        limit:   max results (default 20)
-
-    Returns:
-        List of dicts with: id, topic, score, word_count,
-        source_count, created_at, excerpt (first 300 chars of report)
+    PostgreSQL: uses tsvector / plainto_tsquery with ts_rank ordering.
+    SQLite:     falls back to simple LIKE on topic and report.
     """
     if not query or not query.strip():
         return []
@@ -837,9 +934,6 @@ def search_runs(
     q = query.strip()
 
     if USE_POSTGRES:
-        # PostgreSQL full-text search using plainto_tsquery
-        # plainto_tsquery handles multi-word phrases and ignores punctuation
-        # ts_rank orders results by relevance
         sql = """
             SELECT
                 id, topic, score, word_count, source_count, created_at,
@@ -861,13 +955,374 @@ def search_runs(
             cur.execute(sql, (q, user_id, q, limit))
             return _fetchall(cur)
     else:
-        # SQLite fallback: simple LIKE on both topic and report
-        sql = ("SELECT id, topic, score, word_count, source_count, created_at, "
-               "substr(report, 1, 300) AS excerpt "
-               "FROM runs WHERE user_id = ? AND (topic LIKE ? OR report LIKE ?) "
-               "ORDER BY created_at DESC LIMIT ?")
+        sql = (
+            "SELECT id, topic, score, word_count, source_count, created_at, "
+            "substr(report, 1, 300) AS excerpt "
+            "FROM runs WHERE user_id = ? AND (topic LIKE ? OR report LIKE ?) "
+            "ORDER BY created_at DESC LIMIT ?"
+        )
         with _conn() as con:
             cur = con.cursor()
             like = f"%{q}%"
             cur.execute(sql, (user_id, like, like, limit))
             return _fetchall(cur)
+
+# ══════════════════════════════════════════════════════════════════════════════
+# ASYNC DATABASE LAYER — Phase 2 upgrade
+# ══════════════════════════════════════════════════════════════════════════════
+
+import json as _json   # already imported above as alias — safe to repeat
+
+# ── Runs ──────────────────────────────────────────────────────────────────────
+
+async def get_run_async(run_id: int) -> dict | None:
+    """Async version of get_run(). Returns one run dict or None."""
+    if not _async_pool:
+        return get_run(run_id)
+    async with _async_pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT * FROM runs WHERE id = $1",
+            run_id,
+        )
+    return dict(row) if row else None
+
+
+async def delete_run_async(run_id: int) -> bool:
+    """Async version of delete_run(). Returns True if a row was deleted."""
+    if not _async_pool:
+        return delete_run(run_id)
+    async with _async_pool.acquire() as conn:
+        result = await conn.execute(
+            "DELETE FROM runs WHERE id = $1",
+            run_id,
+        )
+    return result.split()[-1] != "0"
+
+
+async def search_runs_async(
+    user_id: int,
+    query:   str,
+    limit:   int = 20,
+) -> list[dict]:
+    """Async full-text search over research runs."""
+    if not _async_pool:
+        return search_runs(user_id, query, limit)
+    async with _async_pool.acquire() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT id, topic, score, word_count, created_at,
+                   SUBSTRING(report, 1, 300) AS excerpt
+            FROM   runs
+            WHERE  user_id = $1
+              AND  (
+                     to_tsvector('english', topic || ' ' || report)
+                     @@ plainto_tsquery('english', $2)
+                     OR topic ILIKE $3
+                   )
+            ORDER  BY created_at DESC
+            LIMIT  $4
+            """,
+            user_id, query, f"%{query}%", limit,
+        )
+    return [dict(row) for row in rows]
+
+
+# ── Users ─────────────────────────────────────────────────────────────────────
+
+async def get_user_by_email_async(email: str) -> dict | None:
+    """Async version of get_user_by_email()."""
+    if not _async_pool:
+        return get_user_by_email(email)
+    async with _async_pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT * FROM users WHERE email = $1",
+            email,
+        )
+    return dict(row) if row else None
+
+
+async def get_user_full_async(user_id: int) -> dict | None:
+    """Async version of get_user_full(). Called on every /api/auth/me request."""
+    if not _async_pool:
+        return get_user_full(user_id)
+    async with _async_pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            SELECT id, email, username, city, default_topic, created_at
+            FROM   users
+            WHERE  id = $1
+            """,
+            user_id,
+        )
+    return dict(row) if row else None
+
+
+async def create_user_async(
+    email:         str,
+    username:      str,
+    password_hash: str,
+) -> int:
+    """Async version of create_user(). Returns the new user's id."""
+    if not _async_pool:
+        return create_user(email, username, password_hash)
+    async with _async_pool.acquire() as conn:
+        user_id = await conn.fetchval(
+            """
+            INSERT INTO users (email, username, password_hash, created_at)
+            VALUES ($1, $2, $3, $4)
+            RETURNING id
+            """,
+            email, username, password_hash, time.time(),
+        )
+    return user_id
+
+
+async def update_user_profile_async(
+    user_id:       int,
+    city:          str | None = None,
+    default_topic: str | None = None,
+) -> bool:
+    """Async version of update_user_profile(). Only updates provided fields."""
+    if not _async_pool:
+        return update_user_profile(user_id, city=city, default_topic=default_topic)
+    updates = []
+    values  = []
+    if city is not None:
+        updates.append(f"city = ${len(values)+1}")
+        values.append(city.strip())
+    if default_topic is not None:
+        updates.append(f"default_topic = ${len(values)+1}")
+        values.append(default_topic.strip())
+    if not updates:
+        return False
+    updates.append(f"updated_at = ${len(values)+1}")
+    values.append(time.time())
+    values.append(user_id)
+    async with _async_pool.acquire() as conn:
+        result = await conn.execute(
+            f"UPDATE users SET {', '.join(updates)} WHERE id = ${len(values)}",
+            *values,
+        )
+    return result.split()[-1] != "0"
+
+
+# ── Workspaces ────────────────────────────────────────────────────────────────
+
+async def get_workspaces_async(user_id: int) -> list[dict]:
+    """Async version of get_workspaces()."""
+    if not _async_pool:
+        return get_workspaces(user_id)
+    async with _async_pool.acquire() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT id, user_id, name, topic, description, created_at, updated_at
+            FROM   workspaces
+            WHERE  user_id = $1
+            ORDER  BY updated_at DESC NULLS LAST, created_at DESC
+            """,
+            user_id,
+        )
+    return [dict(row) for row in rows]
+
+
+async def create_workspace_async(
+    user_id:     int,
+    name:        str,
+    topic:       str,
+    description: str = "",
+) -> int:
+    """Async version of create_workspace(). Returns new workspace id."""
+    if not _async_pool:
+        return create_workspace(user_id, name, topic, description)
+    async with _async_pool.acquire() as conn:
+        wid = await conn.fetchval(
+            """
+            INSERT INTO workspaces (user_id, name, topic, description, created_at)
+            VALUES ($1, $2, $3, $4, $5)
+            RETURNING id
+            """,
+            user_id, name.strip(), topic.strip(), description.strip(), time.time(),
+        )
+    return wid
+
+
+async def delete_workspace_async(workspace_id: int) -> bool:
+    """Async version of delete_workspace()."""
+    if not _async_pool:
+        return delete_workspace(workspace_id)
+    async with _async_pool.acquire() as conn:
+        result = await conn.execute(
+            "DELETE FROM workspaces WHERE id = $1",
+            workspace_id,
+        )
+    return result.split()[-1] != "0"
+
+
+async def get_workspace_async(workspace_id: int) -> dict | None:
+    """Async version of get_workspace(). Used for ownership check before delete."""
+    if not _async_pool:
+        return get_workspace(workspace_id)
+    async with _async_pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT * FROM workspaces WHERE id = $1",
+            workspace_id,
+        )
+    return dict(row) if row else None
+
+
+# ── Activity ──────────────────────────────────────────────────────────────────
+
+async def log_activity_async(
+    user_id:      int,
+    event_type:   str,
+    payload:      dict,
+    workspace_id: int | None = None,
+) -> None:
+    """Async version of log_activity(). Fire-and-forget — never raises, never blocks."""
+    if not _async_pool:
+        log_activity(user_id, event_type, payload, workspace_id)
+        return
+    try:
+        async with _async_pool.acquire() as conn:
+            await conn.execute(
+                """
+                INSERT INTO activity_events
+                    (user_id, event_type, payload, workspace_id, created_at)
+                VALUES ($1, $2, $3, $4, $5)
+                """,
+                user_id, event_type, _json.dumps(payload), workspace_id, time.time(),
+            )
+    except Exception as exc:
+        print(f"[Activity] Failed to log '{event_type}' for user {user_id}: {exc}")
+
+
+async def get_activity_async(user_id: int, limit: int = 20) -> list[dict]:
+    """Async version of get_activity(). Powers the Dashboard activity feed."""
+    if not _async_pool:
+        return get_activity(user_id, limit)
+    async with _async_pool.acquire() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT id, event_type, payload, workspace_id, created_at
+            FROM   activity_events
+            WHERE  user_id = $1
+            ORDER  BY created_at DESC
+            LIMIT  $2
+            """,
+            user_id, limit,
+        )
+    result = [dict(row) for row in rows]
+    for row in result:
+        if isinstance(row.get("payload"), str):
+            try:
+                row["payload"] = _json.loads(row["payload"])
+            except (ValueError, TypeError):
+                row["payload"] = {}
+    return result
+
+
+# ── News tracked topics ───────────────────────────────────────────────────────
+
+async def get_tracked_topics_async(user_id: int) -> list[dict]:
+    """Async version of get_tracked_topics(). Powers the News page sidebar."""
+    if not _async_pool:
+        return get_tracked_topics(user_id)
+    async with _async_pool.acquire() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT * FROM news_tracked_topics
+            WHERE  user_id = $1
+            ORDER  BY created_at DESC
+            """,
+            user_id,
+        )
+    return [dict(row) for row in rows]
+
+
+async def track_news_topic_async(
+    user_id:      int,
+    topic:        str,
+    category:     str = "general",
+    workspace_id: int | None = None,
+) -> int:
+    """Async version of track_news_topic(). ON CONFLICT DO NOTHING = safe to call twice."""
+    if not _async_pool:
+        return track_news_topic(user_id, topic, category, workspace_id)
+    async with _async_pool.acquire() as conn:
+        await conn.execute(
+            """
+            INSERT INTO news_tracked_topics
+                (user_id, topic, category, workspace_id, created_at)
+            VALUES ($1, $2, $3, $4, $5)
+            ON CONFLICT (user_id, topic, category) DO NOTHING
+            """,
+            user_id, topic.strip(), category.strip(), workspace_id, time.time(),
+        )
+        row = await conn.fetchrow(
+            """
+            SELECT id FROM news_tracked_topics
+            WHERE user_id = $1 AND topic = $2 AND category = $3
+            """,
+            user_id, topic.strip(), category.strip(),
+        )
+    return row["id"] if row else 0
+
+
+async def delete_tracked_topic_async(topic_id: int) -> bool:
+    """Async version of delete_tracked_topic()."""
+    if not _async_pool:
+        return delete_tracked_topic(topic_id)
+    async with _async_pool.acquire() as conn:
+        result = await conn.execute(
+            "DELETE FROM news_tracked_topics WHERE id = $1",
+            topic_id,
+        )
+    return result.split()[-1] != "0"
+
+
+# ── RAG sessions ──────────────────────────────────────────────────────────────
+
+async def save_rag_session_async(
+    session_id:   str,
+    user_id:      int,
+    filename:     str,
+    source_type:  str = "pdf",
+    run_id:       int | None = None,
+    workspace_id: int | None = None,
+) -> None:
+    """Async version of save_rag_session(). ON CONFLICT DO NOTHING = safe to call multiple times."""
+    if not _async_pool:
+        save_rag_session(session_id, user_id, filename, source_type, run_id, workspace_id)
+        return
+    async with _async_pool.acquire() as conn:
+        await conn.execute(
+            """
+            INSERT INTO rag_sessions
+                (id, user_id, filename, source_type, run_id, workspace_id, created_at)
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
+            ON CONFLICT (id) DO NOTHING
+            """,
+            session_id, user_id, filename, source_type, run_id, workspace_id, time.time(),
+        )
+
+
+async def update_rag_session_status_async(
+    session_id:  str,
+    status:      str,
+    page_count:  int = 0,
+    chunk_count: int = 0,
+    error_msg:   str | None = None,
+) -> None:
+    """Async version of update_rag_session_status(). Called after PDF ingestion completes."""
+    if not _async_pool:
+        update_rag_session_status(session_id, status, page_count, chunk_count, error_msg)
+        return
+    async with _async_pool.acquire() as conn:
+        await conn.execute(
+            """
+            UPDATE rag_sessions
+            SET    status=$1, page_count=$2, chunk_count=$3, error_msg=$4
+            WHERE  id = $5
+            """,
+            status, page_count, chunk_count, error_msg, session_id,
+        )

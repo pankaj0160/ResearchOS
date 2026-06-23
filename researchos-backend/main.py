@@ -67,6 +67,7 @@ from routers.research_router  import router as research_router
 from routers.rag_router       import router as rag_router, _rag_sessions
 from routers.news_router      import router as news_router
 from routers.workspace_router import router as workspace_router
+from routers.error_handlers   import register_error_handlers
 
 # ── Internal modules ──────────────────────────────────────────────────────────
 import database
@@ -109,9 +110,10 @@ async def lifespan(app: FastAPI):
       1. init_db()      — create tables via psycopg2 (sync, one-time cost)
       2. create_pool()  — open 2 warm async connections to Supabase/Postgres
       3. reload RAG sessions from DB into the shared in-memory dict
+      4. start_session_cleanup() — background task to evict stale sessions
 
     Shutdown:
-      4. pool.close()   — drain and close all pooled connections cleanly
+      5. pool.close()   — drain and close all pooled connections cleanly
     """
     global db_pool
 
@@ -135,7 +137,17 @@ async def lifespan(app: FastAPI):
                 max_size        = 10,  # Supabase free-tier safe ceiling
                 command_timeout = 30,  # seconds before a slow query raises
             )
-            print("[DB Pool] Connected — min=2 max=10 connections ready")
+            is_pooler = "pooler.supabase.com" in database_url
+            mode = "Supavisor session pooler" if is_pooler else "direct"
+            print(f"[DB Pool] Connected ({mode}) — min=2 max=10 connections ready")
+
+            # Inject pool into database.py so save_run_async() / get_history_async()
+            # can use it. Import is here (not at top) to avoid a circular-import
+            # risk — database.py is imported before the pool exists at module load time.
+            from database import set_async_pool
+            set_async_pool(db_pool)
+            print("[DB Pool] Pool injected into database.py")
+
         except Exception as exc:
             # Non-fatal: sync psycopg2 fallback still works for all existing code
             print(f"[DB Pool] Failed to create pool: {exc}")
@@ -172,10 +184,16 @@ async def lifespan(app: FastAPI):
     except Exception as exc:
         print(f"[Startup] RAG session reload failed (non-fatal): {exc}")
 
+    # ── 4. Start background session cleanup ──────────────────────────────────
+    # Removes sessions older than 24h from memory every hour.
+    # Fixes the _rag_sessions memory leak.
+    from routers.rag_router import start_session_cleanup
+    start_session_cleanup()
+
     # ── Hand off to the running server ────────────────────────────────────────
     yield
 
-    # ── 4. Shutdown: drain the pool ───────────────────────────────────────────
+    # ── 5. Shutdown: drain the pool ───────────────────────────────────────────
     if db_pool:
         await db_pool.close()
         print("[DB Pool] Closed cleanly")
@@ -189,6 +207,7 @@ app = FastAPI(
     description="AI Research & Intelligence Platform",
     lifespan=lifespan,
 )
+register_error_handlers(app)
 
 # Initialise app.state.pool to None now; lifespan will set it to db_pool.
 # Routers can access it as:  pool = request.app.state.pool
@@ -201,6 +220,7 @@ app.include_router(research_router)
 app.include_router(rag_router)
 app.include_router(news_router)
 app.include_router(workspace_router)
+
 
 # ── CORS ──────────────────────────────────────────────────────────────────────
 _ORIGINS = [

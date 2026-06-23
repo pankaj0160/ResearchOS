@@ -25,7 +25,15 @@ from fastapi.responses import Response, StreamingResponse
 
 import database
 from auth import get_current_user
-from database import delete_run, get_history, get_run, save_run
+from database import (
+    delete_run,
+    get_history,
+    get_history_async,   # Task 2.3: async version for the /history route handler
+    get_run,
+    save_run,
+    save_run_async,      # Task 2.3: async version for the SSE stream save
+    search_runs_async, get_run_async, delete_run_async,
+)
 from pipeline import run_pipeline_async
 from rag import ingest_text_content
 from rate_limit import research_limiter
@@ -42,16 +50,16 @@ router = APIRouter(tags=["Research"])
 CurrentUser = Annotated[dict, Depends(get_current_user)]
 
 
-# ── Shared state — injected from main.py ──────────────────────────────────────
-# _rag_sessions lives in main.py and is shared with the RAG router.
-# We receive it here as a module-level variable set by main.py at startup.
-# This is a pragmatic approach — in Task 1.3 we move it into a shared state file.
-from routers.rag_router import _rag_sessions, _ingest_text_background
+# ── Shared state — _rag_sessions lives in rag_router ─────────────────────────
+# Import the single shared dict. Do NOT import _ingest_text_background from
+# rag_router — that version is for PDF/text ingestion triggered by the RAG
+# upload endpoint. We define our own below, tailored for research reports.
+from routers.rag_router import _rag_sessions
 
 
 # ── Background helper — ingest report text into ChromaDB ─────────────────────
-# After the pipeline finishes, the report is auto-ingested into RAG
-# so the user can immediately "Chat with this report" without uploading anything.
+# After the pipeline finishes, the report is auto-ingested into RAG so the
+# user can immediately "Chat with this report" without uploading anything.
 # This runs as an asyncio background task — it never blocks the SSE stream.
 
 async def _ingest_text_background(
@@ -146,7 +154,10 @@ async def research_stream(
 
             # Pipeline finished — save the run if we got a report
             if report:
-                run_id = save_run(
+                # Task 2.3: use async version so the event loop is not blocked
+                # while writing to the database. Falls back to sync save_run()
+                # automatically if the async pool is unavailable (local dev).
+                run_id = await save_run_async(
                     topic,
                     report,
                     feedback,
@@ -237,8 +248,9 @@ async def research_stream(
 
 @router.get("/api/history")
 async def history(current_user: CurrentUser):
-    # get_history() filters by user_id — users can never see each other's runs
-    return {"runs": get_history(limit=50, user_id=current_user["id"])}
+    # Task 2.3: use async version so the History page load never blocks the
+    # event loop. Falls back to sync get_history() if pool is unavailable.
+    return {"runs": await get_history_async(limit=50, user_id=current_user["id"])}
 
 
 # ── GET /api/history/search ───────────────────────────────────────────────────
@@ -253,7 +265,7 @@ async def search_history(
     current_user: CurrentUser = None,
     limit:        int = Query(default=20, ge=1, le=50),
 ):
-    results = database.search_runs(current_user["id"], q, limit=limit)
+    results = await search_runs_async(current_user["id"], q, limit=limit)
     return {"results": results, "query": q, "count": len(results)}
 
 
@@ -261,7 +273,7 @@ async def search_history(
 
 @router.get("/api/history/{run_id}")
 async def get_run_route(run_id: int, current_user: CurrentUser):
-    run = get_run(run_id)
+    run = await get_run_async(run_id)
     if not run:
         raise HTTPException(404, "Run not found")
     # Security check — users can only access their own runs
@@ -274,12 +286,12 @@ async def get_run_route(run_id: int, current_user: CurrentUser):
 
 @router.delete("/api/history/{run_id}")
 async def delete_run_route(run_id: int, current_user: CurrentUser):
-    run = get_run(run_id)
+    run = await get_run_async(run_id)
     if not run:
         raise HTTPException(404, "Run not found")
     if run.get("user_id") != current_user["id"]:
         raise HTTPException(403, "Access denied")
-    delete_run(run_id)
+    await delete_run_async(run_id)
     return {"deleted": True}
 
 
@@ -320,6 +332,9 @@ async def export_run(run_id: int, current_user: CurrentUser):
 # ── GET /api/history/{run_id}/related ────────────────────────────────────────
 # Finds other content related to this research run by keyword overlap.
 # Checks: other research runs, RAG sessions, tracked news topics.
+# Intentionally uses sync get_history() here — the bottleneck in this route
+# is the Python keyword-matching loop, not the DB query. Async upgrade deferred
+# to Task 2.4 when all DB calls are converted.
 
 @router.get("/api/history/{run_id}/related")
 async def get_related_content(run_id: int, current_user: CurrentUser):
@@ -344,7 +359,7 @@ async def get_related_content(run_id: int, current_user: CurrentUser):
         t = text.lower()
         return any(kw in t for kw in keywords)
 
-    # Find related research runs
+    # Find related research runs (sync — bottleneck is keyword loop, not DB)
     all_runs     = get_history(limit=100, user_id=uid)
     related_runs = [
         {
@@ -357,7 +372,7 @@ async def get_related_content(run_id: int, current_user: CurrentUser):
         if r["id"] != run_id and matches(r["topic"])
     ][:5]
 
-    # Find related RAG sessions (from shared in-memory dict)
+    # Find related RAG sessions (from shared in-memory dict — no DB call needed)
     related_rag = [
         {
             "session_id":  sid,

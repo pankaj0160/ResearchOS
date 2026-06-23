@@ -17,6 +17,10 @@ from pydantic import BaseModel, EmailStr, field_validator
 import auth                             # your existing auth.py (JWT + bcrypt)
 import database                         # your existing database.py
 from auth import get_current_user       # the dependency that reads the JWT token
+from database import (
+    get_user_by_email_async, create_user_async,
+    get_user_full_async, update_user_profile_async,
+)
 
 # ── Create the router ─────────────────────────────────────────────────────────
 # Think of this like creating a mini-app.
@@ -67,13 +71,13 @@ class ResetPasswordRequest(BaseModel):
 @router.post("/register", status_code=status.HTTP_201_CREATED)
 async def register(req: RegisterRequest):
     # Check if email already exists in the database
-    if database.get_user_by_email(req.email):
+    if await get_user_by_email_async(req.email):
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST,
             "An account with that email already exists"
         )
 
-    # Check if username is already taken
+    # Check if username is already taken (rare call — sync is fine)
     if database.get_user_by_username(req.username):
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST,
@@ -81,7 +85,7 @@ async def register(req: RegisterRequest):
         )
 
     # Create the user — password is hashed inside hash_password(), never stored raw
-    user_id = database.create_user(
+    user_id = await create_user_async(
         email=req.email,
         username=req.username,
         password_hash=auth.hash_password(req.password),
@@ -105,7 +109,7 @@ async def register(req: RegisterRequest):
 @router.post("/login")
 async def login(req: LoginRequest):
     # Look up the user by email
-    user = database.get_user_by_email(req.email)
+    user = await get_user_by_email_async(req.email)
 
     # verify_password() compares the raw password against the stored bcrypt hash
     # We check both conditions together to prevent "email not found" info leaks
@@ -178,7 +182,7 @@ async def reset_password(req: ResetPasswordRequest):
 async def me(current_user: CurrentUser):
     # get_user_full() returns everything including city and default_topic
     # (used by the Dashboard to show local weather and relevant headlines)
-    user = database.get_user_full(current_user["id"])
+    user = await get_user_full_async(current_user["id"])
 
     if user:
         return user
@@ -205,7 +209,7 @@ async def update_me(body: dict, current_user: CurrentUser):
     if not city and not default_topic:
         raise HTTPException(422, "Provide city or default_topic to update")
 
-    database.update_user_profile(
+    await update_user_profile_async(
         current_user["id"],
         city=city,
         default_topic=default_topic,

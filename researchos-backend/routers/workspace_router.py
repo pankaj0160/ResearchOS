@@ -18,6 +18,11 @@ from pydantic import BaseModel
 import database
 from auth import get_current_user
 from database import get_history, get_run
+from database import (
+    get_workspaces_async, create_workspace_async,
+    delete_workspace_async, get_workspace_async,
+    get_activity_async,
+)
 
 # Import the shared RAG sessions dict so global search can include PDF sessions
 from routers.rag_router import _rag_sessions
@@ -41,7 +46,7 @@ class WorkspaceCreate(BaseModel):
 @router.get("/api/workspaces")
 async def list_workspaces(current_user: CurrentUser):
     """Return all workspaces for the logged-in user."""
-    workspaces = database.get_workspaces(current_user["id"])
+    workspaces = await get_workspaces_async(current_user["id"])
     return {"workspaces": workspaces}
 
 
@@ -55,7 +60,7 @@ async def create_workspace(body: WorkspaceCreate, current_user: CurrentUser):
     if not body.topic.strip():
         raise HTTPException(422, "Topic cannot be empty")
 
-    wid = database.create_workspace(
+    wid = await create_workspace_async(
         current_user["id"], body.name, body.topic, body.description
     )
 
@@ -75,12 +80,12 @@ async def create_workspace(body: WorkspaceCreate, current_user: CurrentUser):
 @router.delete("/api/workspaces/{wid}")
 async def delete_workspace(wid: int, current_user: CurrentUser):
     """Delete a workspace. Only the owner can delete it."""
-    ws = database.get_workspace(wid)
+    ws = await get_workspace_async(wid)
     if not ws:
         raise HTTPException(404, "Workspace not found")
     if ws["user_id"] != current_user["id"]:
         raise HTTPException(403, "You don't own this workspace")
-    database.delete_workspace(wid)
+    await delete_workspace_async(wid)
     return {"deleted": True, "workspace_id": wid}
 
 
@@ -96,7 +101,7 @@ async def get_activity(
     Powers the activity feed on the Dashboard.
     limit: how many events to return (1-50, default 20)
     """
-    events = database.get_activity(current_user["id"], limit=limit)
+    events = await get_activity_async(current_user["id"], limit=limit)
     return {"events": events}
 
 
