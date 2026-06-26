@@ -8,6 +8,7 @@ import { useEffect, useRef, useState, useCallback } from 'react'
 import { useSearchParams, useNavigate } from 'react-router-dom'
 import { useAuth }                from '../context/AuthContext'
 import { MiniHistoryStrip } from '../components/History/MiniHistoryStrip'
+import NewsSkeleton from '../components/skeletons/NewsSkeleton'
 
 // ─── tiny helper: read token from localStorage ───────────────────────────────
 const getToken = () => localStorage.getItem('researchos_token') ?? ''
@@ -223,23 +224,23 @@ export default function NewsPage() {
                   )}
 
                   <div className="news-articles-list">
-                    {articles.length === 0 && loading ? (
-                      <ArticlesSkeleton />
-                    ) : articles.length === 0 ? (
-                      <p className="news-no-articles">
-                        No articles found. Try a broader topic or different date range.
-                      </p>
-                    ) : (
-                      articles.map((article, i) => (
-                        <ArticleCard
-                          key={article.url || i}
-                          article={article}
-                          index={i}
-                          currentTopic={topic}
-                        />
-                      ))
-                    )}
-                  </div>
+                  {articles.length === 0 && loading ? (
+                    <NewsSkeleton count={5} />
+                  ) : articles.length === 0 ? (
+                    <p className="news-no-articles">
+                      No articles found. Try a broader topic or different date range.
+                    </p>
+                  ) : (
+                    articles.map((article, i) => (
+                      <ArticleCard
+                        key={article.url || i}
+                        article={article}
+                        index={i}
+                        currentTopic={topic}
+                      />
+                    ))
+                  )}
+                </div>
                 </div>
               </div>
             </div>

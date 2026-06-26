@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { ragApi } from '../../services/ragApi'
 
-export function RelatedContentPanel({ runId }) {
+export const RelatedContentPanel = React.memo(function RelatedContentPanel({ runId }) {
+
   const [data,    setData]    = useState(null)
   const [loading, setLoading] = useState(false)
   const navigate              = useNavigate()
@@ -83,7 +84,7 @@ export function RelatedContentPanel({ runId }) {
       )}
     </aside>
   )
-}
+})
 
 function RelatedSection({ label, children }) {
   return (

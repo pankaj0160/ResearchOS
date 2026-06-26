@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { useSearchParams, useNavigate } from 'react-router-dom'  // NEW
 import TopicInput   from '../components/Research/TopicInput'
 import PipelineFlow from '../components/Research/PipelineFlow'
@@ -190,7 +190,7 @@ export default function ResearchPage() {
 }
 
 
-function RunStatusBadge({ status, isDone }) {
+const RunStatusBadge = React.memo(function RunStatusBadge({ status, isDone }) {
   const labels = {
     idle: 'Ready', loading: 'Loading', running: 'Pipeline Running',
     generating_report: 'Generating Report', completed: 'Report Ready', failed: 'Failed',
@@ -210,9 +210,8 @@ function RunStatusBadge({ status, isDone }) {
       {labels[status] ?? 'Ready'}
     </div>
   )
-}
-
-function MetricCard({ label, value, detail }) {
+})
+const MetricCard = React.memo(function MetricCard({ label, value, detail }) {
   return (
     <div style={{
       borderRadius: 10, border: '1px solid var(--border)',
@@ -235,4 +234,4 @@ function MetricCard({ label, value, detail }) {
       <p style={{ fontSize: 11.5, color: 'var(--text-muted)', margin: 0 }}>{detail}</p>
     </div>
   )
-}
+})

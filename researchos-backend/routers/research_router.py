@@ -37,6 +37,7 @@ from database import (
 from pipeline import run_pipeline_async
 from rag import ingest_text_content
 from rate_limit import research_limiter
+from error_models import STANDARD_ERROR_RESPONSES, ErrorResponse
 
 # ── Create the router ─────────────────────────────────────────────────────────
 # Two prefixes needed here because this router handles TWO url groups:
@@ -271,7 +272,10 @@ async def search_history(
 
 # ── GET /api/history/{run_id} ─────────────────────────────────────────────────
 
-@router.get("/api/history/{run_id}")
+@router.get(
+    "/api/history/{run_id}",
+    responses=STANDARD_ERROR_RESPONSES,
+)
 async def get_run_route(run_id: int, current_user: CurrentUser):
     run = await get_run_async(run_id)
     if not run:
@@ -284,7 +288,10 @@ async def get_run_route(run_id: int, current_user: CurrentUser):
 
 # ── DELETE /api/history/{run_id} ──────────────────────────────────────────────
 
-@router.delete("/api/history/{run_id}")
+@router.delete(
+    "/api/history/{run_id}",
+    responses=STANDARD_ERROR_RESPONSES,
+)
 async def delete_run_route(run_id: int, current_user: CurrentUser):
     run = await get_run_async(run_id)
     if not run:
@@ -299,7 +306,10 @@ async def delete_run_route(run_id: int, current_user: CurrentUser):
 # Returns the report as a downloadable .md file.
 # The browser triggers a file download automatically from the Content-Disposition header.
 
-@router.get("/api/history/{run_id}/export")
+@router.get(
+    "/api/history/{run_id}/export",
+    responses=STANDARD_ERROR_RESPONSES,
+)
 async def export_run(run_id: int, current_user: CurrentUser):
     run = get_run(run_id)
     if not run:

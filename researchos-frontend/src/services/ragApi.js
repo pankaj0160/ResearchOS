@@ -1,158 +1,131 @@
+/**
+ * ragApi.js
+ *
+ * LOCATION: src/services/ragApi.js
+ *
+ * Handles: PDF upload, ingestion status polling, session list,
+ *          chat streaming, chat history, session deletion, text ingest.
+ *
+ * NOTE ON STREAMING:
+ * /api/rag/chat returns a streaming SSE response.
+ * apiClient is not used for streaming — we use EventSource or raw fetch
+ * for those because they need a ReadableStream, not parsed JSON.
+ */
 
+import { apiClient } from './apiClient.js'
 import { API_BASE_URL } from './config.js'
-const BASE = API_BASE_URL
-
-function authHeaders() {
-  const token = localStorage.getItem('researchos_token')
-  return token ? { Authorization: `Bearer ${token}` } : {}
-}
-
-async function request(path, options = {}) {
-  const res = await fetch(`${BASE}${path}`, {
-    headers: { 'Content-Type': 'application/json', ...authHeaders(), ...(options.headers ?? {}) },
-    ...options,
-  })
-  const data = await res.json().catch(() => ({}))
-  if (!res.ok) {
-    const msg = data?.detail ?? `Request failed (${res.status})`
-    throw new Error(Array.isArray(msg) ? msg.map(e => e.msg).join(', ') : msg)
-  }
-  return data
-}
 
 export const ragApi = {
-  /** Upload a PDF — returns { session_id, filename, page_count, chunk_count } */
-  upload(file, onProgress) {
-    return new Promise((resolve, reject) => {
-      const xhr = new XMLHttpRequest()
-      const fd  = new FormData()
-      fd.append('file', file)
 
-      xhr.upload.addEventListener('progress', e => {
-        if (e.lengthComputable && onProgress) onProgress(Math.round((e.loaded / e.total) * 100))
-      })
+  // ── Sessions ──────────────────────────────────────────────────────────────
 
-      xhr.addEventListener('load', () => {
-        try {
-          const data = JSON.parse(xhr.responseText)
-          if (xhr.status >= 200 && xhr.status < 300) resolve(data)
-          else reject(new Error(data?.detail ?? `Upload failed (${xhr.status})`))
-        } catch {
-          reject(new Error('Invalid server response'))
-        }
-      })
-
-      xhr.addEventListener('error', () => reject(new Error('Network error during upload')))
-
-      xhr.open('POST', `${BASE}/api/rag/upload`)
-      const token = localStorage.getItem('researchos_token')
-      if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`)
-      xhr.send(fd)
-    })
+  /** Upload a PDF — returns immediately with status="processing" */
+  upload: (file) => {
+    const form = new FormData()
+    form.append('file', file)
+    return apiClient.upload('/api/rag/upload', form)
   },
 
-  /** List active sessions for current user */
-  listSessions: () => request('/api/rag/sessions'),
+  /** Poll this until status becomes "ready" or "error" */
+  getStatus: (sessionId) =>
+    apiClient.get(`/api/rag/status/${sessionId}`),
 
-  /** Get chat history for a session */
-  getHistory: (sessionId) => request(`/api/rag/history/${sessionId}`),
+  /** Get all PDF sessions for the logged-in user */
+  getSessions: () =>
+    apiClient.get('/api/rag/sessions'),
 
-  /** Delete a session + its ChromaDB collection */
+  /** Delete a session and its uploaded file */
   deleteSession: (sessionId) =>
-    request(`/api/rag/session/${sessionId}`, { method: 'DELETE' }),
+    apiClient.delete(`/api/rag/session/${sessionId}`),
+
+  /** Ingest plain text as a RAG session (no file upload needed) */
+  ingestText: (title, content) =>
+    apiClient.post('/api/rag/ingest-text', {
+      body: { title, content },
+    }),
+
+  // ── Chat ──────────────────────────────────────────────────────────────────
 
   /**
-   * Stream a chat response.
-   * Calls onSources(sources[]), onChunk(text), onDone(), onError(msg)
+   * Get the full conversation history for a session.
+   * Returns list of { role: "user"|"assistant", content: string } messages.
    */
-  async chat(sessionId, question, { onSources, onChunk, onDone, onError }) {
-    const token = localStorage.getItem('researchos_token')
-    const res = await fetch(`${BASE}/api/rag/chat`, {
-      method:  'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      },
-      body: JSON.stringify({ session_id: sessionId, question }),
-    })
+  getHistory: (sessionId) =>
+    apiClient.get(`/api/rag/history/${sessionId}`),
 
+  getRelated: (runId) =>
+    apiClient.get(`/api/research/runs/${runId}/related`),
 
-    
+  /**
+   * Stream a chat answer from the PDF.
+   *
+   * WHY RAW FETCH HERE (not apiClient):
+   * The chat endpoint returns a streaming SSE response — a long-lived
+   * connection that sends chunks one by one.
+   * apiClient.post() reads the entire response as JSON before returning.
+   * For streaming we need direct access to response.body (a ReadableStream).
+   * So we use raw fetch here and handle the stream manually.
+   *
+   * @param {string} sessionId
+   * @param {string} question
+   * @param {function} onChunk   - called with each text chunk as it arrives
+   * @param {function} onSources - called once with the source citations array
+   * @param {function} onDone    - called when the stream finishes
+   * @param {function} onError   - called if the stream errors
+   */
+  streamChat: async (sessionId, question, { onChunk, onSources, onDone, onError }) => {
+    const token = localStorage.getItem('token') || ''
 
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}))
-      onError?.(err?.detail ?? `Chat request failed (${res.status})`)
+    let response
+    try {
+      response = await fetch(`${API_BASE_URL}/api/rag/chat`, {
+        method:  'POST',
+        headers: {
+          'Content-Type':  'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify({ session_id: sessionId, question }),
+      })
+    } catch {
+      onError?.('Network error — cannot reach the server')
       return
     }
 
-    const reader  = res.body.getReader()
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}))
+      onError?.(err.message || 'Chat request failed')
+      return
+    }
+
+    // Read the SSE stream line by line
+    const reader  = response.body.getReader()
     const decoder = new TextDecoder()
-    let   buffer  = ''
 
-    while (true) {
-      const { done, value } = await reader.read()
-      if (done) break
+    try {
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
 
-      buffer += decoder.decode(value, { stream: true })
-      const lines = buffer.split('\n')
-      buffer = lines.pop() ?? ''   // keep incomplete line in buffer
+        const text  = decoder.decode(value, { stream: true })
+        const lines = text.split('\n')
 
-      for (const line of lines) {
-        if (!line.startsWith('data: ')) continue
-        try {
-          const event = JSON.parse(line.slice(6))
-          if (event.type === 'sources') onSources?.(event.sources)
-          else if (event.type === 'chunk')  onChunk?.(event.chunk)
-          else if (event.type === 'done')   onDone?.()
-          else if (event.type === 'error')  onError?.(event.msg)
-        } catch { /* skip malformed */ }
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue
+          try {
+            const event = JSON.parse(line.slice(6))
+            if (event.type === 'sources') onSources?.(event.sources)
+            if (event.type === 'chunk')   onChunk?.(event.chunk)
+            if (event.type === 'done')    onDone?.()
+            if (event.type === 'error')   onError?.(event.msg)
+          } catch {
+            // Ignore malformed SSE lines
+          }
+        }
       }
+    } catch (streamError) {
+      onError?.(streamError.message || 'Stream interrupted')
     }
   },
-
-
-  // Poll status until ready or error
-  async pollStatus(sessionId, onProgress) {
-  const maxAttempts = 60   // 60 × 2s = 2 minutes max
-  let attempts = 0
-
-  while (attempts < maxAttempts) {
-    await new Promise(r => setTimeout(r, 2000))
-
-    const token = localStorage.getItem('researchos_token')
-    const res = await fetch(`${BASE}/api/rag/status/${sessionId}`, {
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
-    })
-
-    if (!res.ok) throw new Error('Status check failed')
-
-    const data = await res.json()
-
-    if (data.status === 'ready') return data
-    if (data.status === 'error') throw new Error(data.error || 'Processing failed')
-
-    attempts++
-    if (onProgress) {
-      const pct = Math.min(10 + (attempts / maxAttempts) * 80, 90)
-      onProgress(Math.round(pct))
-    }
-  }
-
-  throw new Error('Processing timed out. Please try again.')
-},
-
-
- // ── NEW: Text ingest ────────────────────────────────────────────────────────
-
-  ingestText: (title, content) =>
-    request('/api/rag/ingest-text', {
-      method: 'POST',
-      body: JSON.stringify({ title, content }),
-    }),
-
-  // ── NEW: Related content ─────────────────────────────────────────────────────
-
-  getRelated: (runId) =>
-    request(`/api/history/${runId}/related`),
 }
 
+export default ragApi

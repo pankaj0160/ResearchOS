@@ -1,65 +1,50 @@
-import { API_BASE_URL } from './config.js'
-const BASE = API_BASE_URL
+/**
+ * authApi.js
+ *
+ * LOCATION: src/services/authApi.js
+ *
+ * Handles: register, login, forgot-password, reset-password, get profile, update profile.
+ */
 
-async function request(path, options = {}) {
-  const res = await fetch(`${BASE}${path}`, {
-    headers: { 'Content-Type': 'application/json', ...(options.headers ?? {}) },
-    ...options,
-  })
-  const data = await res.json().catch(() => ({}))
-  if (!res.ok) {
-    const msg = data?.detail ?? `Request failed (${res.status})`
-    throw new Error(Array.isArray(msg) ? msg.map(e => e.msg).join(', ') : msg)
-  }
-  return data
-}
-
+import { apiClient } from './apiClient.js'
 
 export const authApi = {
+
+  /** Register a new account */
   register: (email, username, password) =>
-    request('/api/auth/register', {
-      method: 'POST',
-      body: JSON.stringify({ email, username, password }),
+    apiClient.post('/api/auth/register', {
+      body: { email, username, password },
+      skipAuth: true,   // public route — no token needed
     }),
 
+  /** Login — returns { token, user } on success */
   login: (email, password) =>
-    request('/api/auth/login', {
-      method: 'POST',
-      body: JSON.stringify({ email, password }),
+    apiClient.post('/api/auth/login', {
+      body: { email, password },
+      skipAuth: true,   // public route — no token needed
     }),
 
+  /** Send a password reset email */
   forgotPassword: (email) =>
-    request('/api/auth/forgot-password', {
-      method: 'POST',
-      body: JSON.stringify({ email }),
+    apiClient.post('/api/auth/forgot-password', {
+      body: { email },
+      skipAuth: true,
     }),
 
-  resetPassword: (token, new_password) =>
-    request('/api/auth/reset-password', {
-      method: 'POST',
-      body: JSON.stringify({ token, new_password }),
+  /** Reset password using the token from the email link */
+  resetPassword: (token, newPassword) =>
+    apiClient.post('/api/auth/reset-password', {
+      body: { token, new_password: newPassword },
+      skipAuth: true,
     }),
 
-  me: (token) =>
-    request('/api/auth/me', {
-      headers: { Authorization: `Bearer ${token}` },
-    }),
+  /** Get the current user's profile — called on every page load */
+  getMe: () =>
+    apiClient.get('/api/auth/me'),
 
-  /**
-   * GET /api/auth/me with city + default_topic
-   */
-  getProfile: (token) =>
-    request('/api/auth/me', {
-      headers: { Authorization: `Bearer ${token}` },
-    }),
-
-  /**
-   * PATCH /api/auth/me
-   */
-  updateProfile: (token, updates) =>
-    request('/api/auth/me', {
-      method: 'PATCH',
-      headers: { Authorization: `Bearer ${token}` },
-      body: JSON.stringify(updates),
-    }),
+  /** Update profile fields (city, default_topic) */
+  updateMe: (updates) =>
+    apiClient.patch('/api/auth/me', { body: updates }),
 }
+
+export default authApi

@@ -10,36 +10,39 @@
 
 :root {
   /* ── Brand ── */
-  --accent:        #0d9488;   /* teal-600 */
-  --accent-light:  #14b8a6;   /* teal-500 */
-  --accent-dim:    #0d948820;
-  --accent-border: #0d948840;
+  --accent:        #1B6B45;   /* forest green — ResearchOS brand */
+  --accent-light:  #2D8F5F; 
+  --accent-dim:    #1B6B4512;
+  --accent-border: #1B6B4530;
+  --gold:          #C4973A;   /* research quality — scores, highlights */
+  --gold-dim:      #C4973A14;
+  --gold-border:   #C4973A30;
 
   /* ── Light mode surfaces ── */
-  --bg-base:       #f5f5f4;   /* warm off-white */
+  --bg-base:       #F7F5F0;   /* warm paper */
   --bg-card:       #ffffff;
-  --bg-card-hover: #fafafa;
-  --bg-sidebar:    #111110;   /* always-dark sidebar */
+  --bg-card-hover: #F3F1EB;
+  --bg-sidebar:    #0E0E0C;   /* deep ink */
   --bg-input:      #ffffff;
 
   /* ── Light mode text ── */
-  --text-primary:   #1c1917;
-  --text-secondary: #44403c;
-  --text-muted:     #78716c;
-  --text-faint:     #a8a29e;
+  --text-primary:   #0E0E0C;
+  --text-secondary: #3D3A35;
+  --text-muted:     #7A7669;
+  --text-faint:     #B0AB9E;
 
   /* ── Borders ── */
-  --border:        #e7e5e4;
-  --border-strong: #d6d3d1;
+  --border:        #E2DED6;
+  --border-strong: #CCC8BF;
 
   /* ── Sidebar (always dark) ── */
-  --sb-bg:          #111110;
-  --sb-text:        #a8a29e;
-  --sb-text-active: #fafaf9;
-  --sb-hover:       #1c1a19;
-  --sb-active:      #1c1a19;
-  --sb-border:      #292524;
-  --sb-accent:      #0d9488;
+  --sb-bg:          #0E0E0C;
+  --sb-text:        #8A8479;
+  --sb-text-active: #F5F2EB;
+  --sb-hover:       #1A1917;
+  --sb-active:      #1F1F1C;
+  --sb-border:      #232320;
+  --sb-accent:      #1B6B45;
 
   /* ── Typography ── */
   --font-display: 'Bricolage Grotesque', system-ui, sans-serif;
@@ -56,6 +59,11 @@
   --shadow-sm: 0 1px 3px 0 rgb(0 0 0 / 0.06), 0 1px 2px -1px rgb(0 0 0 / 0.06);
   --shadow:    0 4px 6px -1px rgb(0 0 0 / 0.07), 0 2px 4px -2px rgb(0 0 0 / 0.07);
   --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.08), 0 4px 6px -4px rgb(0 0 0 / 0.08);
+  --ease-out:      cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-spring:   cubic-bezier(0.34, 1.56, 0.64, 1);
+  --duration-fast: 80ms;
+  --duration-base: 150ms;
+  --duration-slow: 250ms;
 
   /* ── Layout ── */
   --sidebar-width: 232px;
@@ -71,7 +79,7 @@
 
   --text-primary:   #fafaf9;
   --text-secondary: #d6d3d1;
-  --text-muted:     #78716c;
+  --text-muted:     #7A7669;
   --text-faint:     #57534e;
 
   --border:         #292524;
@@ -80,6 +88,11 @@
   --shadow-sm: 0 1px 3px 0 rgb(0 0 0 / 0.3);
   --shadow:    0 4px 6px -1px rgb(0 0 0 / 0.4);
   --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.5);
+  --ease-out:      cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-spring:   cubic-bezier(0.34, 1.56, 0.64, 1);
+  --duration-fast: 80ms;
+  --duration-base: 150ms;
+  --duration-slow: 250ms;
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -495,7 +508,7 @@ a { text-decoration: none; color: inherit; }
   width: var(--sidebar-width);
   min-width: var(--sidebar-width);
   background: var(--sb-bg);
-  border-right: 1px solid var(--sb-border);
+  border-right: 0.5px solid var(--sb-border);
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -626,6 +639,11 @@ a { text-decoration: none; color: inherit; }
   color: var(--sb-text-active);
   background: var(--sb-active);
   font-weight: 500;
+  border-left: 2px solid var(--sb-accent);
+}
+
+.sidebar-nav-item--active svg {
+  color: var(--sb-accent);
 }
 
 .sidebar-nav-item--active svg { color: var(--sb-accent); }
@@ -754,6 +772,7 @@ a { text-decoration: none; color: inherit; }
   overflow-y: auto;
   background: var(--bg-base);
   display: flex;
+  transition: margin-left var(--duration-slow) ease;
   flex-direction: column;
 }
 
@@ -762,6 +781,7 @@ a { text-decoration: none; color: inherit; }
    ═══════════════════════════════════════════════════════════════════════════ */
 
 .page-container {
+  transition: max-width var(--duration-slow) ease;
   flex: 1;
   padding: 2rem 2.5rem;
   max-width: 1200px;
@@ -2804,3 +2824,351 @@ a { text-decoration: none; color: inherit; }
 }
 .dash-chat-send:hover:not(:disabled) { background: var(--accent-light); }
 .dash-chat-send:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   RESEARCHOS PHASE 5 — PREMIUM ADDITIONS
+   Task 5.1: Design Token System + Visual Upgrades
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ── Page transition system ──────────────────────────────────────────────── */
+/* Every page fades + slides up on mount. 150ms — fast enough to feel instant,
+   slow enough to feel smooth. Applied via .page-transition wrapper. */
+
+.page-transition {
+  animation: page-enter var(--duration-base) var(--ease-out) both;
+}
+
+@keyframes page-enter {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Staggered card entrance — cards appear one after another */
+.stagger-1 { animation-delay: 40ms; }
+.stagger-2 { animation-delay: 80ms; }
+.stagger-3 { animation-delay: 120ms; }
+.stagger-4 { animation-delay: 160ms; }
+.stagger-5 { animation-delay: 200ms; }
+
+
+/* ── Premium button states ───────────────────────────────────────────────── */
+/* Every button gets an 80ms press scale so no click feels dead */
+
+.btn-primary {
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  border-radius: var(--radius);
+  padding: 8px 18px;
+  font-size: 14px;
+  font-weight: 500;
+  font-family: var(--font-body);
+  cursor: pointer;
+  transition:
+    background var(--duration-fast) ease,
+    transform var(--duration-fast) ease,
+    box-shadow var(--duration-fast) ease;
+}
+
+.btn-primary:hover {
+  background: #165a39;
+  box-shadow: 0 2px 8px rgba(27,107,69,0.35);
+}
+
+.btn-primary:active {
+  transform: scale(0.97);
+}
+
+.btn-secondary {
+  background: transparent;
+  color: var(--text-primary);
+  border: 0.5px solid var(--border-strong);
+  border-radius: var(--radius);
+  padding: 8px 18px;
+  font-size: 14px;
+  font-weight: 500;
+  font-family: var(--font-body);
+  cursor: pointer;
+  transition:
+    background var(--duration-fast) ease,
+    border-color var(--duration-fast) ease,
+    transform var(--duration-fast) ease;
+}
+
+.btn-secondary:hover {
+  background: var(--bg-card-hover);
+  border-color: var(--border-strong);
+}
+
+.btn-secondary:active {
+  transform: scale(0.97);
+}
+
+.btn-ghost {
+  background: transparent;
+  color: var(--text-muted);
+  border: none;
+  border-radius: var(--radius-sm);
+  padding: 6px 10px;
+  font-size: 13px;
+  font-family: var(--font-body);
+  cursor: pointer;
+  transition:
+    background var(--duration-fast) ease,
+    color var(--duration-fast) ease,
+    transform var(--duration-fast) ease;
+}
+
+.btn-ghost:hover {
+  background: var(--bg-card-hover);
+  color: var(--text-primary);
+}
+
+.btn-ghost:active {
+  transform: scale(0.96);
+}
+
+
+/* ── Gold score badge ────────────────────────────────────────────────────── */
+/* Research quality scores use gold — not the brand green.
+   Green = action/navigation. Gold = achievement/quality. */
+
+.score-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  font-weight: 500;
+  padding: 2px 9px;
+  border-radius: 99px;
+  background: var(--gold-dim);
+  color: var(--gold);
+  border: 0.5px solid var(--gold-border);
+}
+
+.score-badge--high   { --gold: #1B6B45; --gold-dim: #1B6B4512; --gold-border: #1B6B4530; }  /* 8+/10 */
+.score-badge--medium { --gold: #C4973A; --gold-dim: #C4973A12; --gold-border: #C4973A30; }  /* 6-7/10 */
+.score-badge--low    { --gold: #C0392B; --gold-dim: #C0392B12; --gold-border: #C0392B30; }  /* <6/10 */
+
+
+/* ── Premium card hover ──────────────────────────────────────────────────── */
+/* Cards lift slightly on hover — subtle depth cue */
+
+.card-hover {
+  transition:
+    border-color var(--duration-base) ease,
+    box-shadow var(--duration-base) ease,
+    transform var(--duration-base) ease;
+}
+
+.card-hover:hover {
+  border-color: var(--border-strong);
+  box-shadow: var(--shadow);
+  transform: translateY(-1px);
+}
+
+
+/* ── Sidebar active state premium ────────────────────────────────────────── */
+/* Override the basic bg-change active state with a green left border */
+
+.sidebar-nav-item--active {
+  background: var(--sb-active) !important;
+  color: var(--sb-text-active) !important;
+  border-left: 2px solid var(--sb-accent);
+  padding-left: calc(var(--original-padding, 10px) - 2px);
+}
+
+
+/* ── Sidebar collapse centering fix ──────────────────────────────────────── */
+/* When sidebar collapses, shell-main smoothly expands to fill space.
+   The topbar and page-container both transition. */
+
+.shell-main {
+  transition: width var(--duration-slow) ease !important;
+}
+
+.shell--collapsed .shell-main {
+  /* flex: 1 already handles the width expansion.
+     The transition on flex-basis makes it animate smoothly. */
+}
+
+/* Topbar also needs to be full width of shell-main */
+.topbar {
+  transition: none; /* topbar width follows shell-main automatically */
+}
+
+
+/* ── Premium input focus ──────────────────────────────────────────────────── */
+/* Replace the default blue outline with the brand green */
+
+input:focus,
+textarea:focus,
+select:focus {
+  outline: none;
+  border-color: var(--accent) !important;
+  box-shadow: 0 0 0 3px var(--accent-dim) !important;
+}
+
+
+/* ── Logo mark upgrade ───────────────────────────────────────────────────── */
+/* The R mark in the sidebar gets a subtle shine on hover */
+
+.sidebar-logo-mark {
+  background: var(--accent) !important;
+  transition: box-shadow var(--duration-base) ease;
+}
+
+.sidebar-logo-link:hover .sidebar-logo-mark {
+  box-shadow: 0 0 0 3px rgba(27,107,69,0.25);
+}
+
+
+/* ── Scrollbar upgrade ───────────────────────────────────────────────────── */
+/* Thinner, warmer scrollbars that match the palette */
+
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 99px;
+}
+::-webkit-scrollbar-thumb:hover { background: var(--text-faint); }
+
+
+/* ── Premium focus ring ───────────────────────────────────────────────────── */
+/* Consistent focus ring for keyboard navigation */
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+
+/* ── Selection color ──────────────────────────────────────────────────────── */
+/* Text selection uses the brand green */
+
+::selection {
+  background: var(--accent);
+  color: #fff;
+}
+
+
+/* ── Mobile sidebar drawer ───────────────────────────────────────────────── */
+/* On mobile, sidebar becomes a full-height overlay drawer */
+
+@media (max-width: 768px) {
+  .shell {
+    position: relative;
+  }
+
+  .sidebar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    height: 100vh;
+    z-index: 100;
+    transform: translateX(-100%);
+    transition: transform 0.25s var(--ease-out) !important;
+    width: 260px !important;
+    min-width: 260px !important;
+  }
+
+  .sidebar--mobile-open {
+    transform: translateX(0) !important;
+  }
+
+  /* Backdrop overlay when sidebar is open on mobile */
+  .sidebar-backdrop {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.5);
+    z-index: 99;
+    animation: fade-in 0.2s ease;
+  }
+
+  .sidebar-backdrop--visible {
+    display: block;
+  }
+
+  .shell-main {
+    width: 100% !important;
+  }
+
+  /* Mobile hamburger button — shown only on mobile */
+  .mobile-menu-btn {
+    display: flex !important;
+  }
+
+  /* Hide collapse button on mobile */
+  .sidebar-collapse-btn {
+    display: none;
+  }
+
+  /* Page container uses full width on mobile */
+  .page-container {
+    padding: 1.25rem 1rem;
+    max-width: 100%;
+  }
+}
+
+/* Hide mobile menu button on desktop */
+.mobile-menu-btn {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: background var(--duration-fast) ease, color var(--duration-fast) ease;
+}
+
+.mobile-menu-btn:hover {
+  background: var(--bg-card-hover);
+  color: var(--text-primary);
+}
+
+
+/* ── Typography upgrades ──────────────────────────────────────────────────── */
+/* Tighter letter-spacing on headings for premium feel */
+
+.page-title {
+  letter-spacing: -0.035em !important;
+  font-weight: 600 !important;
+}
+
+h1, h2, h3 {
+  letter-spacing: -0.02em;
+}
+
+
+/* ── Agent card premium states ────────────────────────────────────────────── */
+/* Agent cards get a left border color based on their state */
+
+.agent-card--thinking  { border-left: 2px solid var(--gold); }
+.agent-card--active    { border-left: 2px solid var(--accent); }
+.agent-card--complete  { border-left: 2px solid #1B6B45; }
+.agent-card--error     { border-left: 2px solid #C0392B; }
+
+
+/* ── Sidebar section labels ───────────────────────────────────────────────── */
+/* Section group labels (RESEARCH, WORKSPACE, etc.) more refined */
+
+.sidebar-nav-section {
+  font-size: 10px !important;
+  font-weight: 600 !important;
+  letter-spacing: 0.08em !important;
+  color: rgba(138,132,121,0.7) !important;
+  text-transform: uppercase;
+}

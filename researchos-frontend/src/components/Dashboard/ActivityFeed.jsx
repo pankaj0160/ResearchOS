@@ -57,9 +57,27 @@ export function ActivityFeed({ limit = 15 }) {
   const navigate              = useNavigate()
 
   useEffect(() => {
-    activityApi.getRecent(limit)
-      .then(data => { setEvents(data.events ?? []); setLoading(false) })
-      .catch(() => setLoading(false))
+    let cancelled = false
+
+    setLoading(true)
+
+    activityApi.getRecent(limit).then(result => {
+      if (cancelled) return
+
+      if (result.ok) {
+        setEvents(result.data?.events ?? [])
+      } else {
+        // apiClient already shows a toast for 429/500/network errors,
+        // and redirects to /login on 401. For other failures (404/422
+        // if the route or limit is malformed) we just fall back to empty.
+        setEvents([])
+      }
+      setLoading(false)
+    })
+
+    // Cleanup: if `limit` changes again or component unmounts before
+    // this resolves, skip the stale setState calls.
+    return () => { cancelled = true }
   }, [limit])
 
   if (loading) return (

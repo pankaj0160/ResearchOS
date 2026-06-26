@@ -1,107 +1,97 @@
+/**
+ * newsApi.js
+ *
+ * LOCATION: src/services/newsApi.js
+ *
+ * Handles: news search, tracked topics CRUD.
+ * Note: /api/news/summarize is an SSE stream — handled in the hook directly.
+ */
 
-import { API_BASE_URL } from './config.js'
-const BASE = API_BASE_URL
+import { apiClient } from './apiClient.js'
 
-function authHeaders() {
-  const token = localStorage.getItem('researchos_token')
-  return token ? { Authorization: `Bearer ${token}` } : {}
-}
-
-async function get(path) {
-  const res = await fetch(`${BASE}${path}`, { headers: { ...authHeaders() } })
-  const data = await res.json().catch(() => ({}))
-  if (!res.ok) {
-    const msg = data?.detail ?? `Request failed (${res.status})`
-    throw new Error(Array.isArray(msg) ? msg.map(e => e.msg).join(', ') : msg)
-  }
-  return data
-}
-
+/**
+ * Category filters for news search.
+ * `value` must match whatever your backend's `category` query param expects
+ * (e.g. NewsAPI-style categories). Update this list if your backend supports
+ * a different/larger set — UI and API stay in sync automatically since both
+ * the pills and apiClient.get(...) consume this single array.
+ */
 export const CATEGORIES = [
-  { value: 'general',    label: 'General',    icon: '🌐' },
-  { value: 'technology', label: 'Technology', icon: '💻' },
-  { value: 'finance',    label: 'Finance',    icon: '📈' },
-  { value: 'science',    label: 'Science',    icon: '🔬' },
-  { value: 'health',     label: 'Health',     icon: '🏥' },
-  { value: 'politics',   label: 'Politics',   icon: '🏛' },
-  { value: 'business',   label: 'Business',   icon: '💼' },
-  { value: 'world',      label: 'World',      icon: '🗺' },
-  { value: 'sports',     label: 'Sports',     icon: '⚽' },
+  { value: 'general',       label: 'General',       icon: '📰' },
+  { value: 'business',      label: 'Business',       icon: '💼' },
+  { value: 'technology',    label: 'Technology',     icon: '💻' },
+  { value: 'science',       label: 'Science',        icon: '🔬' },
+  { value: 'health',        label: 'Health',         icon: '🩺' },
+  { value: 'sports',        label: 'Sports',         icon: '🏆' },
+  { value: 'entertainment', label: 'Entertainment',  icon: '🎬' },
+  { value: 'politics',      label: 'Politics',       icon: '🏛️' },
 ]
 
 export const newsApi = {
-  /** Fetch articles only (no summary) */
+
+  /** Search for news articles on a topic */
   search: (topic, category = 'general', days = 7) =>
-    get(`/api/news/search?topic=${encodeURIComponent(topic)}&category=${category}&days=${days}`),
+    apiClient.get(
+      `/api/news/search?topic=${encodeURIComponent(topic)}&category=${category}&days=${days}`
+    ),
 
-  /**
-   * Fetch articles + stream AI summary.
-   * Calls: onArticles(articles[]), onChunk(text), onDone(count), onError(msg)
-   */
-    async summarize(topic, category = 'general', days = 7, { onArticles, onChunk, onDone, onError } = {}) {
-    const url = `${BASE}/api/news/summarize?topic=${encodeURIComponent(topic)}&category=${category}&days=${days}`
-    const res = await fetch(url, { headers: { ...authHeaders() } })
+    /** Stream an AI summary for a topic via SSE */
+    summarize: (topic, category = 'general', days = 7, callbacks = {}) => {
+      const { onArticles, onChunk, onDone, onError } = callbacks
 
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}))
-      onError?.(err?.detail ?? `News request failed (${res.status})`)
-      return
-    }
+      const token = localStorage.getItem('researchos_token') ?? ''
+      const url = `${import.meta.env.VITE_API_BASE_URL ?? ''}/api/news/summarize` +
+        `?topic=${encodeURIComponent(topic)}&category=${encodeURIComponent(category)}&days=${days}`
 
-    const reader  = res.body.getReader()
-    const decoder = new TextDecoder()
-    let buffer = ''
+      return new Promise((resolve) => {
+        const es = new EventSource(`${url}&token=${encodeURIComponent(token)}`)
 
-    while (true) {
-      const { done, value } = await reader.read()
-      if (done) break
+        es.addEventListener('articles', (e) => {
+          try {
+            const arts = JSON.parse(e.data)
+            onArticles?.(arts)
+          } catch { /* malformed JSON — ignore */ }
+        })
 
-      buffer += decoder.decode(value, { stream: true })
-      const lines = buffer.split('\n')
-      buffer = lines.pop() ?? ''
+        es.addEventListener('chunk', (e) => {
+          onChunk?.(e.data)
+        })
 
-      for (const line of lines) {
-        if (!line.startsWith('data: ')) continue
-        try {
-          const event = JSON.parse(line.slice(6))
-          if      (event.type === 'articles') onArticles?.(event.articles)
-          else if (event.type === 'chunk')    onChunk?.(event.chunk)
-          else if (event.type === 'done')     onDone?.(event.article_count)
-          else if (event.type === 'error')    onError?.(event.msg)
-        } catch {}
-      }
-    }
-  },
+        es.addEventListener('done', () => {
+          es.close()
+          onDone?.()
+          resolve()
+        })
 
-  // ── NEW: Topic tracking ──────────────────────────────────────────────────────
+        es.addEventListener('error', (e) => {
+          es.close()
+          const msg = e.data ?? 'News search failed. Please try again.'
+          onError?.(msg)
+          resolve()
+        })
 
-  getTracked: () => get('/api/news/tracked'),
+        // Native SSE onerror fires on connection drop / non-2xx
+        es.onerror = () => {
+          es.close()
+          onError?.('Connection lost. Please try again.')
+          resolve()
+        }
+      })
+    },
 
-  track: (topic, category = 'general', workspaceId = null) => {
-    const token = localStorage.getItem('researchos_token')
+  /** Get all tracked news topics for the user */
+  getTracked: () =>
+    apiClient.get('/api/news/tracked'),
 
-    return fetch(`${BASE}/api/news/track`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      },
-      body: JSON.stringify({
-        topic,
-        category,
-        workspace_id: workspaceId,
-      }),
-    }).then(r => r.json())
-  },
+  /** Add a topic to the tracked list */
+  trackTopic: (topic, category = 'general', workspaceId = null) =>
+    apiClient.post('/api/news/track', {
+      body: { topic, category, workspace_id: workspaceId },
+    }),
 
-  untrack: (topicId) => {
-    const token = localStorage.getItem('researchos_token')
-
-    return fetch(`${BASE}/api/news/tracked/${topicId}`, {
-      method: 'DELETE',
-      headers: token
-        ? { Authorization: `Bearer ${token}` }
-        : {},
-    }).then(r => r.json())
-  },
+  /** Remove a topic from the tracked list */
+  untrackTopic: (topicId) =>
+    apiClient.delete(`/api/news/tracked/${topicId}`),
 }
+
+export default newsApi

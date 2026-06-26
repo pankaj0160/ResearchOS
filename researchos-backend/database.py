@@ -1,94 +1,143 @@
 """
-database.py — PostgreSQL handler for ResearchOS.
+database.py — Complete database layer for ResearchOS.
 
-Replaces SQLite with PostgreSQL via psycopg2.
-Connection URL read from DATABASE_URL env var.
+Supports two backends:
+  1. PostgreSQL (Supabase)  — when DATABASE_URL or SUPABASE_DB_URL is set
+  2. SQLite                 — local dev fallback (no Supabase required)
 
-Falls back to SQLite if DATABASE_URL is not set —
-this keeps local development working without Supabase.
+Design principles:
+  - Every function has a sync version (fallback) and async version (production)
+  - Async versions use the connection pool injected at startup by main.py
+  - Schema includes ALL tables with all columns — no more missing-column crashes
+  - ALTER TABLE statements add missing columns to existing databases safely
+  - In-memory cache for dashboard data (weather, headlines) reduces external API calls
 
-Schema (PostgreSQL):
-  users(id, email, username, password_hash, is_verified, created_at)
-  runs(id, topic, report, feedback, score, user_id, created_at)
-  reset_tokens(id, user_id, token, expires_at, used)
-  agents(id, owner_id, name, system_prompt, tools, model, created_at)
-  support_tickets(id, name, email, subject, message, created_at)
+Tables:
+  users               — registered accounts
+  runs                — research pipeline results
+  reset_tokens        — password reset links
+  agents              — custom AI agent definitions
+  support_tickets     — user support requests
+  workspaces          — research workspaces (group work by topic)
+  activity_events     — user action log (powers activity feed)
+  news_tracked_topics — topics the user follows in News page
+  rag_sessions        — PDF upload metadata and processing status
 """
 
 from __future__ import annotations
 
+import json as _json
 import os
 import re
 import time
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Generator
+from typing import Any, Generator
 
 # ── Config ────────────────────────────────────────────────────────────────────
 
-DATABASE_URL = os.getenv("DATABASE_URL", "")
-DB_PATH      = Path(__file__).parent / "researchos.db"   # SQLite fallback
-
-# True = use PostgreSQL, False = use SQLite fallback
+DATABASE_URL = (
+    os.getenv("DATABASE_URL", "").strip()
+    or os.getenv("SUPABASE_DB_URL", "").strip()
+    or ""
+)
+DB_PATH   = Path(__file__).parent / "researchos.db"  # SQLite fallback
 USE_POSTGRES = bool(DATABASE_URL)
 
-# ── Async pool — injected at startup by main.py ───────────────────────────────
-# None until set_async_pool() is called, or in local SQLite mode.
-# The TYPE annotation is a string to avoid importing asyncpg at module level
-# (asyncpg may not be installed in all environments; we import it lazily).
-_async_pool: "asyncpg.Pool | None" = None
+# ── Async pool (injected at startup by main.py's lifespan) ───────────────────
+# Stays None in local SQLite mode or before startup completes.
+_async_pool: Any = None   # type: asyncpg.Pool | None
 
 
-def set_async_pool(pool) -> None:
+def set_async_pool(pool: Any) -> None:
     """
-    Inject the asyncpg connection pool created in main.py's lifespan into
-    this module so async DB functions can use it.
-
-    Called once at startup — after asyncpg.create_pool() succeeds.
-    Never called in local SQLite mode (pool stays None, async functions
-    fall back transparently to their sync counterparts).
+    Called once at startup by main.py after asyncpg.create_pool() succeeds.
+    All async DB functions use this pool — never create their own connections.
     """
     global _async_pool
     _async_pool = pool
 
 
-# ── Schema ────────────────────────────────────────────────────────────────────
+# ── Simple in-memory cache (for dashboard data) ───────────────────────────────
+# Stores {key: (value, expires_at)} — avoids hitting external APIs on every page load.
+# This is NOT Redis — it's a simple dict that lives in memory only.
+# If the server restarts, cache clears. That's fine for weather/headlines data.
+_cache: dict[str, tuple[Any, float]] = {}
 
-# PostgreSQL version — uses SERIAL and %s
-_PG_SCHEMA_STATEMENTS = [
+
+def cache_get(key: str) -> Any | None:
+    """Return cached value if it exists and hasn't expired. Returns None otherwise."""
+    entry = _cache.get(key)
+    if entry and time.time() < entry[1]:
+        return entry[0]
+    return None
+
+
+def cache_set(key: str, value: Any, ttl_seconds: int = 300) -> None:
+    """Store value in cache with a time-to-live (TTL) in seconds."""
+    _cache[key] = (value, time.time() + ttl_seconds)
+
+
+def cache_delete(key: str) -> None:
+    """Remove a key from cache (call when data changes)."""
+    _cache.pop(key, None)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# SCHEMA DEFINITIONS
+# Complete schema for ALL tables with ALL columns.
+# ALTER TABLE statements safely add columns to existing databases.
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# PostgreSQL schema — $N placeholders, SERIAL primary keys
+_PG_SCHEMA = [
+
+    # ── Users ─────────────────────────────────────────────────────────────────
     """
     CREATE TABLE IF NOT EXISTS users (
-        id            SERIAL PRIMARY KEY,
-        email         TEXT   NOT NULL UNIQUE,
-        username      TEXT   NOT NULL UNIQUE,
-        password_hash TEXT   NOT NULL,
+        id            SERIAL  PRIMARY KEY,
+        email         TEXT    NOT NULL UNIQUE,
+        username      TEXT    NOT NULL UNIQUE,
+        password_hash TEXT    NOT NULL,
         is_verified   INTEGER NOT NULL DEFAULT 0,
-        created_at    REAL   NOT NULL
+        city          TEXT,
+        default_topic TEXT,
+        created_at    REAL    NOT NULL,
+        updated_at    REAL
     )
     """,
+
+    # ── Research runs ─────────────────────────────────────────────────────────
     """
     CREATE TABLE IF NOT EXISTS runs (
-        id         SERIAL PRIMARY KEY,
-        topic      TEXT  NOT NULL,
-        report     TEXT  NOT NULL DEFAULT '',
-        feedback   TEXT  NOT NULL DEFAULT '',
-        score      REAL,
-        user_id    INTEGER REFERENCES users(id),
-        created_at REAL  NOT NULL
+        id           SERIAL  PRIMARY KEY,
+        topic        TEXT    NOT NULL,
+        report       TEXT    NOT NULL DEFAULT '',
+        feedback     TEXT    NOT NULL DEFAULT '',
+        score        REAL,
+        user_id      INTEGER REFERENCES users(id),
+        workspace_id INTEGER,
+        word_count   INTEGER NOT NULL DEFAULT 0,
+        source_count INTEGER NOT NULL DEFAULT 0,
+        created_at   REAL    NOT NULL
     )
     """,
+
+    # ── Password reset tokens ─────────────────────────────────────────────────
     """
     CREATE TABLE IF NOT EXISTS reset_tokens (
-        id         SERIAL PRIMARY KEY,
+        id         SERIAL  PRIMARY KEY,
         user_id    INTEGER NOT NULL REFERENCES users(id),
         token      TEXT    NOT NULL UNIQUE,
         expires_at REAL    NOT NULL,
         used       INTEGER NOT NULL DEFAULT 0
     )
     """,
+
+    # ── Custom AI agents ──────────────────────────────────────────────────────
     """
     CREATE TABLE IF NOT EXISTS agents (
-        id            SERIAL PRIMARY KEY,
+        id            SERIAL  PRIMARY KEY,
         owner_id      INTEGER NOT NULL REFERENCES users(id),
         name          TEXT    NOT NULL,
         system_prompt TEXT    NOT NULL,
@@ -97,44 +146,124 @@ _PG_SCHEMA_STATEMENTS = [
         created_at    REAL    NOT NULL
     )
     """,
+
+    # ── Support tickets ───────────────────────────────────────────────────────
     """
     CREATE TABLE IF NOT EXISTS support_tickets (
         id         SERIAL PRIMARY KEY,
-        name       TEXT NOT NULL,
-        email      TEXT NOT NULL,
-        subject    TEXT NOT NULL,
-        message    TEXT NOT NULL,
-        created_at REAL NOT NULL
+        name       TEXT   NOT NULL,
+        email      TEXT   NOT NULL,
+        subject    TEXT   NOT NULL,
+        message    TEXT   NOT NULL,
+        created_at REAL   NOT NULL
+    )
+    """,
+
+    # ── Workspaces ────────────────────────────────────────────────────────────
+    """
+    CREATE TABLE IF NOT EXISTS workspaces (
+        id           SERIAL  PRIMARY KEY,
+        user_id      INTEGER NOT NULL REFERENCES users(id),
+        name         TEXT    NOT NULL,
+        topic        TEXT    NOT NULL DEFAULT '',
+        description  TEXT    NOT NULL DEFAULT '',
+        created_at   REAL    NOT NULL,
+        updated_at   REAL
+    )
+    """,
+
+    # ── Activity events (powers activity feed) ────────────────────────────────
+    """
+    CREATE TABLE IF NOT EXISTS activity_events (
+        id           SERIAL  PRIMARY KEY,
+        user_id      INTEGER NOT NULL REFERENCES users(id),
+        event_type   TEXT    NOT NULL,
+        payload      TEXT    NOT NULL DEFAULT '{}',
+        workspace_id INTEGER,
+        created_at   REAL    NOT NULL
+    )
+    """,
+
+    # ── News tracked topics ───────────────────────────────────────────────────
+    """
+    CREATE TABLE IF NOT EXISTS news_tracked_topics (
+        id           SERIAL  PRIMARY KEY,
+        user_id      INTEGER NOT NULL REFERENCES users(id),
+        topic        TEXT    NOT NULL,
+        category     TEXT    NOT NULL DEFAULT 'general',
+        workspace_id INTEGER,
+        created_at   REAL    NOT NULL,
+        UNIQUE(user_id, topic, category)
+    )
+    """,
+
+    # ── RAG sessions (PDF uploads) ────────────────────────────────────────────
+    """
+    CREATE TABLE IF NOT EXISTS rag_sessions (
+        id           TEXT    PRIMARY KEY,
+        user_id      INTEGER NOT NULL REFERENCES users(id),
+        filename     TEXT    NOT NULL,
+        source_type  TEXT    NOT NULL DEFAULT 'pdf',
+        status       TEXT    NOT NULL DEFAULT 'processing',
+        page_count   INTEGER NOT NULL DEFAULT 0,
+        chunk_count  INTEGER NOT NULL DEFAULT 0,
+        error_msg    TEXT,
+        run_id       INTEGER,
+        workspace_id INTEGER,
+        created_at   REAL    NOT NULL
     )
     """,
 ]
 
-# SQLite version — uses AUTOINCREMENT and ? (unchanged from before)
-_SQLITE_CREATE_SQL = """
+# ALTER TABLE statements — safely add columns to existing databases.
+# Each runs as a separate statement; IF NOT EXISTS prevents errors on fresh DBs.
+# IMPORTANT: These run AFTER CREATE TABLE IF NOT EXISTS, so existing databases
+# get the new columns without destroying existing data.
+_PG_MIGRATIONS = [
+    # Add columns that were added after initial deployment
+    "ALTER TABLE users         ADD COLUMN IF NOT EXISTS city          TEXT",
+    "ALTER TABLE users         ADD COLUMN IF NOT EXISTS default_topic TEXT",
+    "ALTER TABLE users         ADD COLUMN IF NOT EXISTS updated_at    REAL",
+    "ALTER TABLE runs          ADD COLUMN IF NOT EXISTS workspace_id  INTEGER",
+    "ALTER TABLE runs          ADD COLUMN IF NOT EXISTS word_count    INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE runs          ADD COLUMN IF NOT EXISTS source_count  INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE workspaces    ADD COLUMN IF NOT EXISTS updated_at    REAL",
+    "ALTER TABLE rag_sessions  ADD COLUMN IF NOT EXISTS workspace_id  INTEGER",
+    "ALTER TABLE rag_sessions  ADD COLUMN IF NOT EXISTS error_msg     TEXT",
+    "ALTER TABLE rag_sessions  ADD COLUMN IF NOT EXISTS run_id        INTEGER",
+]
+
+# SQLite schema — ? placeholders, AUTOINCREMENT primary keys
+_SQLITE_SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
     email         TEXT    NOT NULL UNIQUE,
     username      TEXT    NOT NULL UNIQUE,
     password_hash TEXT    NOT NULL,
     is_verified   INTEGER NOT NULL DEFAULT 0,
-    created_at    REAL    NOT NULL
+    city          TEXT,
+    default_topic TEXT,
+    created_at    REAL    NOT NULL,
+    updated_at    REAL
 );
 CREATE TABLE IF NOT EXISTS runs (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    topic       TEXT    NOT NULL,
-    report      TEXT    NOT NULL DEFAULT '',
-    feedback    TEXT    NOT NULL DEFAULT '',
-    score       REAL,
-    user_id     INTEGER REFERENCES users(id),
-    created_at  REAL    NOT NULL
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    topic        TEXT    NOT NULL,
+    report       TEXT    NOT NULL DEFAULT '',
+    feedback     TEXT    NOT NULL DEFAULT '',
+    score        REAL,
+    user_id      INTEGER REFERENCES users(id),
+    workspace_id INTEGER,
+    word_count   INTEGER NOT NULL DEFAULT 0,
+    source_count INTEGER NOT NULL DEFAULT 0,
+    created_at   REAL    NOT NULL
 );
 CREATE TABLE IF NOT EXISTS reset_tokens (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id    INTEGER NOT NULL,
+    user_id    INTEGER NOT NULL REFERENCES users(id),
     token      TEXT    NOT NULL UNIQUE,
     expires_at REAL    NOT NULL,
-    used       INTEGER NOT NULL DEFAULT 0,
-    FOREIGN KEY (user_id) REFERENCES users(id)
+    used       INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS agents (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -153,16 +282,58 @@ CREATE TABLE IF NOT EXISTS support_tickets (
     message    TEXT NOT NULL,
     created_at REAL NOT NULL
 );
+CREATE TABLE IF NOT EXISTS workspaces (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id      INTEGER NOT NULL REFERENCES users(id),
+    name         TEXT    NOT NULL,
+    topic        TEXT    NOT NULL DEFAULT '',
+    description  TEXT    NOT NULL DEFAULT '',
+    created_at   REAL    NOT NULL,
+    updated_at   REAL
+);
+CREATE TABLE IF NOT EXISTS activity_events (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id      INTEGER NOT NULL REFERENCES users(id),
+    event_type   TEXT    NOT NULL,
+    payload      TEXT    NOT NULL DEFAULT '{}',
+    workspace_id INTEGER,
+    created_at   REAL    NOT NULL
+);
+CREATE TABLE IF NOT EXISTS news_tracked_topics (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id      INTEGER NOT NULL REFERENCES users(id),
+    topic        TEXT    NOT NULL,
+    category     TEXT    NOT NULL DEFAULT 'general',
+    workspace_id INTEGER,
+    created_at   REAL    NOT NULL,
+    UNIQUE(user_id, topic, category)
+);
+CREATE TABLE IF NOT EXISTS rag_sessions (
+    id           TEXT    PRIMARY KEY,
+    user_id      INTEGER NOT NULL REFERENCES users(id),
+    filename     TEXT    NOT NULL,
+    source_type  TEXT    NOT NULL DEFAULT 'pdf',
+    status       TEXT    NOT NULL DEFAULT 'processing',
+    page_count   INTEGER NOT NULL DEFAULT 0,
+    chunk_count  INTEGER NOT NULL DEFAULT 0,
+    error_msg    TEXT,
+    run_id       INTEGER,
+    workspace_id INTEGER,
+    created_at   REAL    NOT NULL
+);
 """
 
-# ── Connection context managers ───────────────────────────────────────────────
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# CONNECTION HELPERS
+# ═══════════════════════════════════════════════════════════════════════════════
 
 @contextmanager
 def _conn() -> Generator:
     """
-    Returns a connection to PostgreSQL (if DATABASE_URL is set)
-    or SQLite (fallback for local dev without Supabase).
-    Automatically commits on success, rolls back on exception.
+    Context manager that yields a database connection.
+    Auto-commits on success, auto-rollbacks on exception, always closes.
+    Routes to PostgreSQL or SQLite based on DATABASE_URL.
     """
     if USE_POSTGRES:
         with _pg_conn() as con:
@@ -174,6 +345,7 @@ def _conn() -> Generator:
 
 @contextmanager
 def _pg_conn() -> Generator:
+    """Open one psycopg2 connection to PostgreSQL. Opens + closes on every call."""
     import psycopg2
     import psycopg2.extras
     con = psycopg2.connect(DATABASE_URL)
@@ -190,6 +362,7 @@ def _pg_conn() -> Generator:
 
 @contextmanager
 def _sqlite_conn() -> Generator:
+    """Open one SQLite connection. Uses Row factory so rows behave like dicts."""
     import sqlite3
     con = sqlite3.connect(DB_PATH, check_same_thread=False)
     con.row_factory = sqlite3.Row
@@ -205,55 +378,66 @@ def _sqlite_conn() -> Generator:
 
 
 def _fetchone(cur) -> dict | None:
-    """Normalize a cursor row to a plain dict regardless of DB backend."""
+    """Convert a cursor row to a plain dict regardless of DB backend."""
     row = cur.fetchone()
     if row is None:
         return None
     if hasattr(row, "keys"):
-        return dict(row)                        # sqlite3.Row
+        return dict(row)  # sqlite3.Row
     if hasattr(cur, "description") and cur.description:
-        cols = [d[0] for d in cur.description]  # psycopg2 tuple
-        return dict(zip(cols, row))
+        return dict(zip([d[0] for d in cur.description], row))  # psycopg2 tuple
     return None
 
 
 def _fetchall(cur) -> list[dict]:
-    """Normalize all cursor rows to a list of plain dicts."""
+    """Convert all cursor rows to a list of plain dicts."""
     rows = cur.fetchall()
     if not rows:
         return []
     if hasattr(rows[0], "keys"):
-        return [dict(r) for r in rows]          # sqlite3.Row
+        return [dict(r) for r in rows]  # sqlite3.Row list
     if hasattr(cur, "description") and cur.description:
-        cols = [d[0] for d in cur.description]  # psycopg2 tuples
-        return [dict(zip(cols, r)) for r in rows]
+        cols = [d[0] for d in cur.description]
+        return [dict(zip(cols, r)) for r in rows]  # psycopg2 tuple list
     return []
 
 
 def _q(sql: str) -> str:
-    """
-    Convert SQLite-style ? placeholders to PostgreSQL %s placeholders.
-    Only applied when USE_POSTGRES is True.
-    """
-    if USE_POSTGRES:
-        return sql.replace("?", "%s")
-    return sql
+    """Replace ? with %s for PostgreSQL. SQLite keeps ? as-is."""
+    return sql.replace("?", "%s") if USE_POSTGRES else sql
 
 
-# ── Init ──────────────────────────────────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════════════════
+# INIT — Create all tables at startup
+# ═══════════════════════════════════════════════════════════════════════════════
 
 def init_db() -> None:
-    """Create all tables if they don't exist. Called once at startup."""
+    """
+    Create all tables and apply migrations. Called once at startup by main.py.
+    Safe to run on existing databases — IF NOT EXISTS and ALTER TABLE IF NOT EXISTS
+    ensure no data is ever lost.
+    """
     if USE_POSTGRES:
         import psycopg2
         con = psycopg2.connect(DATABASE_URL)
         con.autocommit = False
         try:
             cur = con.cursor()
-            for statement in _PG_SCHEMA_STATEMENTS:
-                cur.execute(statement)
+            # Create all tables
+            for stmt in _PG_SCHEMA:
+                cur.execute(stmt)
+            # Apply column migrations for existing databases
+            for stmt in _PG_MIGRATIONS:
+                try:
+                    cur.execute(stmt)
+                except Exception as e:
+                    # Some columns may already exist — that's fine
+                    con.rollback()
+                    print(f"[DB Migration] Non-fatal: {e}")
+                    # Re-open transaction after rollback
+                    cur = con.cursor()
             con.commit()
-            print(f"[DB] ResearchOS initialised (PostgreSQL — Supabase)")
+            print("[DB] ResearchOS initialised (PostgreSQL — Supabase)")
         except Exception:
             con.rollback()
             raise
@@ -262,13 +446,15 @@ def init_db() -> None:
     else:
         import sqlite3
         con = sqlite3.connect(DB_PATH, check_same_thread=False)
-        con.executescript(_SQLITE_CREATE_SQL)
+        con.executescript(_SQLITE_SCHEMA)
         con.commit()
         con.close()
         print(f"[DB] ResearchOS initialised (SQLite at {DB_PATH})")
 
 
-# ── Runs — Write ──────────────────────────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════════════════
+# RESEARCH RUNS — Write
+# ═══════════════════════════════════════════════════════════════════════════════
 
 def save_run(
     topic: str,
@@ -278,9 +464,11 @@ def save_run(
     workspace_id: int | None = None,
 ) -> int:
     """
-    Sync version — used as fallback when async pool is unavailable (local dev).
-    Blocks the event loop; prefer save_run_async() in production route handlers.
+    Save a completed research run (sync fallback for local dev).
+    In production, prefer save_run_async() to avoid blocking the event loop.
+    Returns the new run's database id.
     """
+    # Extract score from feedback text e.g. "Score: 8/10"
     score: float | None = None
     m = re.search(r"Score:\s*(\d+(?:\.\d+)?)/10", feedback, re.IGNORECASE)
     if m:
@@ -294,8 +482,7 @@ def save_run(
         cur.execute(
             _q(
                 "INSERT INTO runs (topic, report, feedback, score, user_id, workspace_id, "
-                "word_count, source_count, created_at) "
-                "VALUES (?,?,?,?,?,?,?,?,?)"
+                "word_count, source_count, created_at) VALUES (?,?,?,?,?,?,?,?,?)"
             ),
             (topic, report, feedback, score, user_id, workspace_id,
              word_count, source_count, time.time()),
@@ -306,97 +493,21 @@ def save_run(
         return cur.lastrowid
 
 
-# ── Runs — Read ───────────────────────────────────────────────────────────────
-
-def get_history(limit: int = 50, user_id: int | None = None) -> list[dict]:
-    """
-    Sync version — used as fallback when async pool is unavailable (local dev).
-    Blocks the event loop; prefer get_history_async() in production route handlers.
-    """
-    with _conn() as con:
-        cur = con.cursor()
-        if user_id is not None:
-            cur.execute(
-                _q("""SELECT id, topic, score, created_at,
-                             substr(report, 1, 200) AS excerpt
-                      FROM runs WHERE user_id = ?
-                      ORDER BY created_at DESC LIMIT ?"""),
-                (user_id, limit),
-            )
-        else:
-            cur.execute(
-                _q("""SELECT id, topic, score, created_at,
-                             substr(report, 1, 200) AS excerpt
-                      FROM runs ORDER BY created_at DESC LIMIT ?"""),
-                (limit,),
-            )
-        return _fetchall(cur)
-
-
-def get_run(run_id: int) -> dict | None:
-    with _conn() as con:
-        cur = con.cursor()
-        cur.execute(_q("SELECT * FROM runs WHERE id = ?"), (run_id,))
-        return _fetchone(cur)
-
-
-def delete_run(run_id: int) -> bool:
-    with _conn() as con:
-        cur = con.cursor()
-        cur.execute(_q("DELETE FROM runs WHERE id = ?"), (run_id,))
-        return cur.rowcount > 0
-
-
-# ── Runs — Async versions (Task 2.3) ─────────────────────────────────────────
-#
-# Pattern: "strangler fig"
-#   Sync versions remain as fallback for local dev / pool unavailable.
-#   Async versions are called by route handlers when the pool is ready.
-#   Over time, sync versions will be replaced entirely (Task 2.4+).
-#
-# asyncpg vs psycopg2 syntax reference:
-#   psycopg2  cur.execute("... WHERE id = %s", (uid,))   → %s placeholders
-#   asyncpg   conn.fetch("... WHERE id = $1", uid)        → $N placeholders
-#
-#   psycopg2  cur.fetchone()[0]   → scalar
-#   asyncpg   conn.fetchval(...)  → scalar (cleaner)
-#
-#   psycopg2  cur.fetchone()      → tuple/Row
-#   asyncpg   conn.fetchrow(...)  → Record (dict-like, read-only)
-#
-#   psycopg2  cur.fetchall()      → list of tuples/Rows
-#   asyncpg   conn.fetch(...)     → list of Records
-#
-# Records must be converted to plain dicts before returning from routes
-# because asyncpg Records are not JSON-serialisable by default.
-
-
 async def save_run_async(
-    topic:        str,
-    report:       str,
-    feedback:     str,
-    user_id:      int | None = None,
+    topic: str,
+    report: str,
+    feedback: str,
+    user_id: int | None = None,
     workspace_id: int | None = None,
 ) -> int:
     """
-    Async version of save_run().
-
-    Saves a completed research run using a pooled async connection so the
-    event loop is never blocked. Falls back to sync save_run() transparently
-    if the pool is not available (local dev / SQLite mode).
-
+    Save a completed research run without blocking the event loop.
+    Falls back to sync save_run() if the async pool isn't available.
     Returns the new run's database id.
-
-    IMPORTANT — caller must be an async function:
-        run_id = await save_run_async(topic, report, feedback, user_id=uid)
     """
     if not _async_pool:
-        # Pool not ready — fall back to sync version.
-        # This is intentional: local dev keeps working without asyncpg.
         return save_run(topic, report, feedback, user_id, workspace_id)
 
-    # Compute derived fields before acquiring the connection to keep
-    # connection hold-time as short as possible.
     score: float | None = None
     m = re.search(r"Score:\s*(\d+(?:\.\d+)?)/10", feedback, re.IGNORECASE)
     if m:
@@ -405,45 +516,50 @@ async def save_run_async(
     word_count   = len(report.split())
     source_count = len(re.findall(r'\[.*?\]\(https?://', report))
 
-    # acquire() borrows one connection from the pool.
-    # The connection is returned automatically when the block exits —
-    # even if an exception is raised — so no connection leaks.
+    # acquire() borrows one connection from the pool for the duration of this block
     async with _async_pool.acquire() as conn:
-        # fetchval() returns the single scalar from RETURNING id.
-        # $1..$9 are asyncpg's positional parameter style.
         run_id: int = await conn.fetchval(
             """
             INSERT INTO runs
                 (topic, report, feedback, score, user_id, workspace_id,
                  word_count, source_count, created_at)
-            VALUES
-                ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
             RETURNING id
             """,
             topic, report, feedback, score, user_id, workspace_id,
             word_count, source_count, time.time(),
         )
-
     return run_id
 
 
-async def get_history_async(
-    limit:   int = 50,
-    user_id: int | None = None,
-) -> list[dict]:
-    """
-    Async version of get_history().
+# ═══════════════════════════════════════════════════════════════════════════════
+# RESEARCH RUNS — Read
+# ═══════════════════════════════════════════════════════════════════════════════
 
-    Returns recent research runs without blocking the event loop.
-    Falls back to sync get_history() if the pool is not available.
+def get_history(limit: int = 50, user_id: int | None = None) -> list[dict]:
+    """Return research runs as list of dicts. Sync fallback."""
+    with _conn() as con:
+        cur = con.cursor()
+        if user_id is not None:
+            cur.execute(
+                _q("""SELECT id, topic, score, word_count, source_count, created_at,
+                             substr(report, 1, 300) AS excerpt
+                      FROM runs WHERE user_id = ?
+                      ORDER BY created_at DESC LIMIT ?"""),
+                (user_id, limit),
+            )
+        else:
+            cur.execute(
+                _q("""SELECT id, topic, score, word_count, source_count, created_at,
+                             substr(report, 1, 300) AS excerpt
+                      FROM runs ORDER BY created_at DESC LIMIT ?"""),
+                (limit,),
+            )
+        return _fetchall(cur)
 
-    Columns returned: id, topic, score, word_count, source_count,
-                      created_at, excerpt (first 200 chars of report).
 
-    Note: word_count and source_count are added here vs the sync version
-    because the History page already renders them — no schema change needed,
-    the columns exist on the runs table.
-    """
+async def get_history_async(limit: int = 50, user_id: int | None = None) -> list[dict]:
+    """Return research runs without blocking the event loop."""
     if not _async_pool:
         return get_history(limit=limit, user_id=user_id)
 
@@ -452,7 +568,7 @@ async def get_history_async(
             rows = await conn.fetch(
                 """
                 SELECT id, topic, score, word_count, source_count, created_at,
-                       SUBSTRING(report, 1, 200) AS excerpt
+                       SUBSTRING(report, 1, 300) AS excerpt
                 FROM   runs
                 WHERE  user_id = $1
                 ORDER  BY created_at DESC
@@ -464,22 +580,123 @@ async def get_history_async(
             rows = await conn.fetch(
                 """
                 SELECT id, topic, score, word_count, source_count, created_at,
-                       SUBSTRING(report, 1, 200) AS excerpt
+                       SUBSTRING(report, 1, 300) AS excerpt
                 FROM   runs
                 ORDER  BY created_at DESC
                 LIMIT  $1
                 """,
                 limit,
             )
-
-    # asyncpg Record objects are read-only and not JSON-serialisable.
-    # dict(row) produces a plain {col: value} dict FastAPI can return directly.
     return [dict(row) for row in rows]
 
 
-# ── Users — Write ─────────────────────────────────────────────────────────────
+def get_run(run_id: int) -> dict | None:
+    """Return one research run by id. Includes full report text."""
+    with _conn() as con:
+        cur = con.cursor()
+        cur.execute(_q("SELECT * FROM runs WHERE id = ?"), (run_id,))
+        return _fetchone(cur)
+
+
+async def get_run_async(run_id: int) -> dict | None:
+    """Return one research run by id (async)."""
+    if not _async_pool:
+        return get_run(run_id)
+    async with _async_pool.acquire() as conn:
+        row = await conn.fetchrow("SELECT * FROM runs WHERE id = $1", run_id)
+    return dict(row) if row else None
+
+
+def delete_run(run_id: int) -> bool:
+    """Delete a research run. Returns True if deleted."""
+    with _conn() as con:
+        cur = con.cursor()
+        cur.execute(_q("DELETE FROM runs WHERE id = ?"), (run_id,))
+        return cur.rowcount > 0
+
+
+async def delete_run_async(run_id: int) -> bool:
+    """Delete a research run (async). Returns True if deleted."""
+    if not _async_pool:
+        return delete_run(run_id)
+    async with _async_pool.acquire() as conn:
+        result = await conn.execute("DELETE FROM runs WHERE id = $1", run_id)
+    return result.split()[-1] != "0"
+
+
+def search_runs(user_id: int, query: str, limit: int = 20) -> list[dict]:
+    """
+    Full-text search over research topics and report content.
+    PostgreSQL uses tsvector for fast indexed search.
+    SQLite uses LIKE (slower but works locally).
+    """
+    if not query or not query.strip():
+        return []
+    q = query.strip()
+
+    if USE_POSTGRES:
+        sql = """
+            SELECT id, topic, score, word_count, source_count, created_at,
+                   LEFT(report, 300) AS excerpt,
+                   ts_rank(
+                       to_tsvector('english', COALESCE(topic,'') || ' ' || COALESCE(report,'')),
+                       plainto_tsquery('english', %s)
+                   ) AS rank
+            FROM runs
+            WHERE user_id = %s
+              AND to_tsvector('english', COALESCE(topic,'') || ' ' || COALESCE(report,''))
+                  @@ plainto_tsquery('english', %s)
+            ORDER BY rank DESC, created_at DESC
+            LIMIT %s
+        """
+        with _conn() as con:
+            cur = con.cursor()
+            cur.execute(sql, (q, user_id, q, limit))
+            return _fetchall(cur)
+    else:
+        sql = (
+            "SELECT id, topic, score, word_count, source_count, created_at, "
+            "substr(report, 1, 300) AS excerpt "
+            "FROM runs WHERE user_id = ? AND (topic LIKE ? OR report LIKE ?) "
+            "ORDER BY created_at DESC LIMIT ?"
+        )
+        with _conn() as con:
+            cur = con.cursor()
+            like = f"%{q}%"
+            cur.execute(sql, (user_id, like, like, limit))
+            return _fetchall(cur)
+
+
+async def search_runs_async(user_id: int, query: str, limit: int = 20) -> list[dict]:
+    """Full-text search over research runs (async)."""
+    if not _async_pool:
+        return search_runs(user_id, query, limit)
+    async with _async_pool.acquire() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT id, topic, score, word_count, source_count, created_at,
+                   SUBSTRING(report, 1, 300) AS excerpt
+            FROM   runs
+            WHERE  user_id = $1
+              AND  (
+                     to_tsvector('english', topic || ' ' || report)
+                     @@ plainto_tsquery('english', $2)
+                     OR topic ILIKE $3
+                   )
+            ORDER  BY created_at DESC
+            LIMIT  $4
+            """,
+            user_id, query, f"%{query}%", limit,
+        )
+    return [dict(row) for row in rows]
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# USERS — Write
+# ═══════════════════════════════════════════════════════════════════════════════
 
 def create_user(email: str, username: str, password_hash: str) -> int:
+    """Create a new user. Returns the new user's id."""
     with _conn() as con:
         cur = con.cursor()
         cur.execute(
@@ -492,10 +709,91 @@ def create_user(email: str, username: str, password_hash: str) -> int:
         return cur.lastrowid
 
 
+async def create_user_async(email: str, username: str, password_hash: str) -> int:
+    """Create a new user (async). Returns the new user's id."""
+    if not _async_pool:
+        return create_user(email, username, password_hash)
+    async with _async_pool.acquire() as conn:
+        user_id = await conn.fetchval(
+            """
+            INSERT INTO users (email, username, password_hash, created_at)
+            VALUES ($1, $2, $3, $4)
+            RETURNING id
+            """,
+            email, username, password_hash, time.time(),
+        )
+    return user_id
+
+
+def update_password(user_id: int, password_hash: str) -> None:
+    """Update a user's password hash."""
+    with _conn() as con:
+        cur = con.cursor()
+        cur.execute(
+            _q("UPDATE users SET password_hash = ? WHERE id = ?"),
+            (password_hash, user_id),
+        )
+
+
+def update_user_profile(
+    user_id: int,
+    city: str | None = None,
+    default_topic: str | None = None,
+) -> bool:
+    """Update optional profile fields. Only updates fields that are provided."""
+    fields: dict = {}
+    if city is not None:
+        fields["city"] = city.strip()
+    if default_topic is not None:
+        fields["default_topic"] = default_topic.strip()
+    if not fields:
+        return False
+    fields["updated_at"] = time.time()
+    set_clause = ", ".join(f"{k} = ?" for k in fields)
+    with _conn() as con:
+        cur = con.cursor()
+        cur.execute(
+            _q(f"UPDATE users SET {set_clause} WHERE id = ?"),
+            (*fields.values(), user_id),
+        )
+        return cur.rowcount > 0
+
+
+async def update_user_profile_async(
+    user_id: int,
+    city: str | None = None,
+    default_topic: str | None = None,
+) -> bool:
+    """Update optional profile fields (async)."""
+    if not _async_pool:
+        return update_user_profile(user_id, city=city, default_topic=default_topic)
+    updates = []
+    values: list = []
+    if city is not None:
+        updates.append(f"city = ${len(values)+1}")
+        values.append(city.strip())
+    if default_topic is not None:
+        updates.append(f"default_topic = ${len(values)+1}")
+        values.append(default_topic.strip())
+    if not updates:
+        return False
+    updates.append(f"updated_at = ${len(values)+1}")
+    values.append(time.time())
+    values.append(user_id)
+    async with _async_pool.acquire() as conn:
+        result = await conn.execute(
+            f"UPDATE users SET {', '.join(updates)} WHERE id = ${len(values)}",
+            *values,
+        )
+    return result.split()[-1] != "0"
+
+
 def save_reset_token(user_id: int, token: str, ttl_seconds: int = 3600) -> None:
+    """Save a password reset token. Invalidates any previous tokens for this user."""
     expires_at = time.time() + ttl_seconds
     with _conn() as con:
         cur = con.cursor()
+        # Invalidate old tokens first
         cur.execute(_q("UPDATE reset_tokens SET used = 1 WHERE user_id = ? AND used = 0"), (user_id,))
         cur.execute(
             _q("INSERT INTO reset_tokens (user_id, token, expires_at) VALUES (?,?,?)"),
@@ -504,6 +802,10 @@ def save_reset_token(user_id: int, token: str, ttl_seconds: int = 3600) -> None:
 
 
 def use_reset_token(token: str) -> int | None:
+    """
+    Validate and consume a reset token. Returns user_id if valid, None otherwise.
+    Marks the token as used so it can't be reused.
+    """
     now = time.time()
     with _conn() as con:
         cur = con.cursor()
@@ -518,22 +820,23 @@ def use_reset_token(token: str) -> int | None:
         return row["user_id"]
 
 
-def update_password(user_id: int, password_hash: str) -> None:
-    with _conn() as con:
-        cur = con.cursor()
-        cur.execute(
-            _q("UPDATE users SET password_hash = ? WHERE id = ?"),
-            (password_hash, user_id),
-        )
-
-
-# ── Users — Read ──────────────────────────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════════════════
+# USERS — Read
+# ═══════════════════════════════════════════════════════════════════════════════
 
 def get_user_by_email(email: str) -> dict | None:
     with _conn() as con:
         cur = con.cursor()
         cur.execute(_q("SELECT * FROM users WHERE email = ?"), (email,))
         return _fetchone(cur)
+
+
+async def get_user_by_email_async(email: str) -> dict | None:
+    if not _async_pool:
+        return get_user_by_email(email)
+    async with _async_pool.acquire() as conn:
+        row = await conn.fetchrow("SELECT * FROM users WHERE email = $1", email)
+    return dict(row) if row else None
 
 
 def get_user_by_username(username: str) -> dict | None:
@@ -550,86 +853,8 @@ def get_user_by_id(user_id: int) -> dict | None:
         return _fetchone(cur)
 
 
-# ── Agents — Write ────────────────────────────────────────────────────────────
-
-def create_agent(owner_id: int, name: str, system_prompt: str, tools: list[str], model: str) -> int:
-    tools_str = ",".join(tools)
-    with _conn() as con:
-        cur = con.cursor()
-        cur.execute(
-            _q("INSERT INTO agents (owner_id, name, system_prompt, tools, model, created_at) VALUES (?,?,?,?,?,?)"),
-            (owner_id, name, system_prompt, tools_str, model, time.time()),
-        )
-        if USE_POSTGRES:
-            cur.execute("SELECT lastval()")
-            return cur.fetchone()[0]
-        return cur.lastrowid
-
-
-def delete_agent(agent_id: int) -> bool:
-    with _conn() as con:
-        cur = con.cursor()
-        cur.execute(_q("DELETE FROM agents WHERE id = ?"), (agent_id,))
-        return cur.rowcount > 0
-
-
-# ── Agents — Read ─────────────────────────────────────────────────────────────
-
-def get_agents_by_user(owner_id: int) -> list[dict]:
-    with _conn() as con:
-        cur = con.cursor()
-        cur.execute(
-            _q("SELECT * FROM agents WHERE owner_id = ? ORDER BY created_at DESC"),
-            (owner_id,),
-        )
-        rows = _fetchall(cur)
-    for d in rows:
-        d["tools"] = d["tools"].split(",") if d["tools"] else []
-    return rows
-
-
-def get_agent_by_id(agent_id: int) -> dict | None:
-    with _conn() as con:
-        cur = con.cursor()
-        cur.execute(_q("SELECT * FROM agents WHERE id = ?"), (agent_id,))
-        d = _fetchone(cur)
-    if not d:
-        return None
-    d["tools"] = d["tools"].split(",") if d["tools"] else []
-    return d
-
-
-# ── Support Tickets — Write ───────────────────────────────────────────────────
-
-def create_support_ticket(name: str, email: str, subject: str, message: str) -> int:
-    with _conn() as con:
-        cur = con.cursor()
-        cur.execute(
-            _q("INSERT INTO support_tickets (name, email, subject, message, created_at) VALUES (?,?,?,?,?)"),
-            (name, email, subject, message, time.time()),
-        )
-        if USE_POSTGRES:
-            cur.execute("SELECT lastval()")
-            return cur.fetchone()[0]
-        return cur.lastrowid
-
-
-# ── Support Tickets — Read ────────────────────────────────────────────────────
-
-def get_support_tickets(limit: int = 100) -> list[dict]:
-    with _conn() as con:
-        cur = con.cursor()
-        cur.execute(
-            _q("SELECT * FROM support_tickets ORDER BY created_at DESC LIMIT ?"),
-            (limit,),
-        )
-        return _fetchall(cur)
-
-
-# ── User Profile — Read (enhanced) ────────────────────────────────────────────
-
 def get_user_full(user_id: int) -> dict | None:
-    """Return user row including new profile fields (city, default_topic)."""
+    """Return user with profile fields (city, default_topic)."""
     with _conn() as con:
         cur = con.cursor()
         cur.execute(
@@ -639,43 +864,27 @@ def get_user_full(user_id: int) -> dict | None:
         return _fetchone(cur)
 
 
-# ── User Profile — Write ──────────────────────────────────────────────────────
-
-def update_user_profile(
-    user_id: int,
-    city: str | None = None,
-    default_topic: str | None = None,
-) -> bool:
-    """Update city and/or default_topic for a user. Only updates fields provided."""
-    fields: dict = {}
-    if city is not None:
-        fields["city"] = city.strip()
-    if default_topic is not None:
-        fields["default_topic"] = default_topic.strip()
-    if not fields:
-        return False
-
-    fields["updated_at"] = time.time()
-    set_clause = ", ".join(f"{k} = ?" for k in fields)
-
-    with _conn() as con:
-        cur = con.cursor()
-        cur.execute(
-            _q(f"UPDATE users SET {set_clause} WHERE id = ?"),
-            (*fields.values(), user_id),
+async def get_user_full_async(user_id: int) -> dict | None:
+    """Return user with profile fields (async). Called on every /api/auth/me request."""
+    if not _async_pool:
+        return get_user_full(user_id)
+    async with _async_pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            SELECT id, email, username, city, default_topic, created_at
+            FROM   users WHERE id = $1
+            """,
+            user_id,
         )
-        return cur.rowcount > 0
+    return dict(row) if row else None
 
 
-# ── Workspaces — Write ────────────────────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════════════════
+# WORKSPACES
+# ═══════════════════════════════════════════════════════════════════════════════
 
-def create_workspace(
-    user_id: int,
-    name: str,
-    topic: str,
-    description: str = "",
-) -> int:
-    """Create a new workspace. Returns the new workspace id."""
+def create_workspace(user_id: int, name: str, topic: str, description: str = "") -> int:
+    """Create a new workspace. Returns its id."""
     with _conn() as con:
         cur = con.cursor()
         cur.execute(
@@ -688,8 +897,24 @@ def create_workspace(
         return cur.lastrowid
 
 
+async def create_workspace_async(user_id: int, name: str, topic: str, description: str = "") -> int:
+    """Create a new workspace (async). Returns its id."""
+    if not _async_pool:
+        return create_workspace(user_id, name, topic, description)
+    async with _async_pool.acquire() as conn:
+        wid = await conn.fetchval(
+            """
+            INSERT INTO workspaces (user_id, name, topic, description, created_at)
+            VALUES ($1, $2, $3, $4, $5)
+            RETURNING id
+            """,
+            user_id, name.strip(), topic.strip(), description.strip(), time.time(),
+        )
+    return wid
+
+
 def get_workspaces(user_id: int) -> list[dict]:
-    """Return all workspaces for a user, newest first."""
+    """Return all workspaces for a user, newest-updated first."""
     with _conn() as con:
         cur = con.cursor()
         cur.execute(
@@ -701,6 +926,23 @@ def get_workspaces(user_id: int) -> list[dict]:
         return _fetchall(cur)
 
 
+async def get_workspaces_async(user_id: int) -> list[dict]:
+    """Return all workspaces for a user (async)."""
+    if not _async_pool:
+        return get_workspaces(user_id)
+    async with _async_pool.acquire() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT id, user_id, name, topic, description, created_at, updated_at
+            FROM   workspaces
+            WHERE  user_id = $1
+            ORDER  BY updated_at DESC NULLS LAST, created_at DESC
+            """,
+            user_id,
+        )
+    return [dict(row) for row in rows]
+
+
 def get_workspace(workspace_id: int) -> dict | None:
     """Return a single workspace by id (used for ownership check before delete)."""
     with _conn() as con:
@@ -709,16 +951,34 @@ def get_workspace(workspace_id: int) -> dict | None:
         return _fetchone(cur)
 
 
+async def get_workspace_async(workspace_id: int) -> dict | None:
+    """Return a single workspace by id (async)."""
+    if not _async_pool:
+        return get_workspace(workspace_id)
+    async with _async_pool.acquire() as conn:
+        row = await conn.fetchrow("SELECT * FROM workspaces WHERE id = $1", workspace_id)
+    return dict(row) if row else None
+
+
 def delete_workspace(workspace_id: int) -> bool:
-    """Delete a workspace. Returns True if a row was deleted."""
+    """Delete a workspace. Returns True if deleted."""
     with _conn() as con:
         cur = con.cursor()
         cur.execute(_q("DELETE FROM workspaces WHERE id = ?"), (workspace_id,))
         return cur.rowcount > 0
 
 
+async def delete_workspace_async(workspace_id: int) -> bool:
+    """Delete a workspace (async). Returns True if deleted."""
+    if not _async_pool:
+        return delete_workspace(workspace_id)
+    async with _async_pool.acquire() as conn:
+        result = await conn.execute("DELETE FROM workspaces WHERE id = $1", workspace_id)
+    return result.split()[-1] != "0"
+
+
 def update_workspace(workspace_id: int, **kwargs) -> bool:
-    """Update name/topic/description of a workspace."""
+    """Update name/topic/description. Only updates provided fields."""
     allowed = {"name", "topic", "description"}
     fields = {k: v for k, v in kwargs.items() if k in allowed}
     if not fields:
@@ -734,10 +994,9 @@ def update_workspace(workspace_id: int, **kwargs) -> bool:
         return cur.rowcount > 0
 
 
-# ── Activity Events ───────────────────────────────────────────────────────────
-
-import json as _json  # alias avoids conflict with any caller's `import json`
-
+# ═══════════════════════════════════════════════════════════════════════════════
+# ACTIVITY EVENTS — Powers the activity feed on Dashboard + each feature page
+# ═══════════════════════════════════════════════════════════════════════════════
 
 def log_activity(
     user_id: int,
@@ -746,16 +1005,19 @@ def log_activity(
     workspace_id: int | None = None,
 ) -> None:
     """
-    Record a user action in activity_events. Fire-and-forget — never raises,
-    so a logging failure never breaks the feature that triggered it.
+    Record a user action. Fire-and-forget — never raises, so activity logging
+    never breaks the feature that triggered it.
+
+    event_type examples: 'research_complete', 'pdf_upload', 'news_search'
+    payload: any dict with context about the event (topic, filename, etc.)
     """
     try:
         with _conn() as con:
             cur = con.cursor()
             cur.execute(
                 _q(
-                    "INSERT INTO activity_events (user_id, event_type, payload, workspace_id, created_at) "
-                    "VALUES (?,?,?,?,?)"
+                    "INSERT INTO activity_events "
+                    "(user_id, event_type, payload, workspace_id, created_at) VALUES (?,?,?,?,?)"
                 ),
                 (user_id, event_type, _json.dumps(payload), workspace_id, time.time()),
             )
@@ -763,8 +1025,32 @@ def log_activity(
         print(f"[Activity] Failed to log '{event_type}' for user {user_id}: {exc}")
 
 
+async def log_activity_async(
+    user_id: int,
+    event_type: str,
+    payload: dict,
+    workspace_id: int | None = None,
+) -> None:
+    """Log a user action without blocking the event loop. Never raises."""
+    if not _async_pool:
+        log_activity(user_id, event_type, payload, workspace_id)
+        return
+    try:
+        async with _async_pool.acquire() as conn:
+            await conn.execute(
+                """
+                INSERT INTO activity_events
+                    (user_id, event_type, payload, workspace_id, created_at)
+                VALUES ($1, $2, $3, $4, $5)
+                """,
+                user_id, event_type, _json.dumps(payload), workspace_id, time.time(),
+            )
+    except Exception as exc:
+        print(f"[Activity] Failed to log '{event_type}' for user {user_id}: {exc}")
+
+
 def get_activity(user_id: int, limit: int = 20) -> list[dict]:
-    """Return recent activity events for a user, payload parsed to dict."""
+    """Return recent activity events for a user with payload parsed from JSON."""
     with _conn() as con:
         cur = con.cursor()
         cur.execute(
@@ -776,7 +1062,6 @@ def get_activity(user_id: int, limit: int = 20) -> list[dict]:
             (user_id, limit),
         )
         rows = _fetchall(cur)
-
     for row in rows:
         if isinstance(row.get("payload"), str):
             try:
@@ -786,7 +1071,34 @@ def get_activity(user_id: int, limit: int = 20) -> list[dict]:
     return rows
 
 
-# ── News Tracked Topics ───────────────────────────────────────────────────────
+async def get_activity_async(user_id: int, limit: int = 20) -> list[dict]:
+    """Return recent activity events (async) with payload parsed from JSON."""
+    if not _async_pool:
+        return get_activity(user_id, limit)
+    async with _async_pool.acquire() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT id, event_type, payload, workspace_id, created_at
+            FROM   activity_events
+            WHERE  user_id = $1
+            ORDER  BY created_at DESC
+            LIMIT  $2
+            """,
+            user_id, limit,
+        )
+    result = [dict(row) for row in rows]
+    for row in result:
+        if isinstance(row.get("payload"), str):
+            try:
+                row["payload"] = _json.loads(row["payload"])
+            except (ValueError, TypeError):
+                row["payload"] = {}
+    return result
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# NEWS TRACKED TOPICS
+# ═══════════════════════════════════════════════════════════════════════════════
 
 def track_news_topic(
     user_id: int,
@@ -795,8 +1107,9 @@ def track_news_topic(
     workspace_id: int | None = None,
 ) -> int:
     """
-    Save a news topic for a user. UNIQUE(user_id, topic, category) prevents
-    duplicates — safe to call repeatedly without error.
+    Save a news topic for a user.
+    ON CONFLICT DO NOTHING prevents duplicates — safe to call repeatedly.
+    Returns the topic id (0 if it already existed and was ignored).
     """
     with _conn() as con:
         cur = con.cursor()
@@ -822,6 +1135,33 @@ def track_news_topic(
             return cur.lastrowid or 0
 
 
+async def track_news_topic_async(
+    user_id: int,
+    topic: str,
+    category: str = "general",
+    workspace_id: int | None = None,
+) -> int:
+    """Save a news topic for a user (async). Safe to call repeatedly."""
+    if not _async_pool:
+        return track_news_topic(user_id, topic, category, workspace_id)
+    async with _async_pool.acquire() as conn:
+        await conn.execute(
+            """
+            INSERT INTO news_tracked_topics
+                (user_id, topic, category, workspace_id, created_at)
+            VALUES ($1, $2, $3, $4, $5)
+            ON CONFLICT (user_id, topic, category) DO NOTHING
+            """,
+            user_id, topic.strip(), category.strip(), workspace_id, time.time(),
+        )
+        row = await conn.fetchrow(
+            """SELECT id FROM news_tracked_topics
+               WHERE user_id = $1 AND topic = $2 AND category = $3""",
+            user_id, topic.strip(), category.strip(),
+        )
+    return row["id"] if row else 0
+
+
 def get_tracked_topics(user_id: int) -> list[dict]:
     """Return all tracked news topics for a user."""
     with _conn() as con:
@@ -833,15 +1173,38 @@ def get_tracked_topics(user_id: int) -> list[dict]:
         return _fetchall(cur)
 
 
+async def get_tracked_topics_async(user_id: int) -> list[dict]:
+    """Return all tracked news topics for a user (async)."""
+    if not _async_pool:
+        return get_tracked_topics(user_id)
+    async with _async_pool.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT * FROM news_tracked_topics WHERE user_id = $1 ORDER BY created_at DESC",
+            user_id,
+        )
+    return [dict(row) for row in rows]
+
+
 def delete_tracked_topic(topic_id: int) -> bool:
-    """Remove a tracked topic. Returns True if a row was deleted."""
+    """Delete a tracked topic. Returns True if deleted."""
     with _conn() as con:
         cur = con.cursor()
         cur.execute(_q("DELETE FROM news_tracked_topics WHERE id = ?"), (topic_id,))
         return cur.rowcount > 0
 
 
-# ── RAG Sessions — DB persistence ─────────────────────────────────────────────
+async def delete_tracked_topic_async(topic_id: int) -> bool:
+    """Delete a tracked topic (async). Returns True if deleted."""
+    if not _async_pool:
+        return delete_tracked_topic(topic_id)
+    async with _async_pool.acquire() as conn:
+        result = await conn.execute("DELETE FROM news_tracked_topics WHERE id = $1", topic_id)
+    return result.split()[-1] != "0"
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# RAG SESSIONS — PDF upload metadata
+# ═══════════════════════════════════════════════════════════════════════════════
 
 def save_rag_session(
     session_id: str,
@@ -851,7 +1214,7 @@ def save_rag_session(
     run_id: int | None = None,
     workspace_id: int | None = None,
 ) -> None:
-    """Persist RAG session metadata to DB. ON CONFLICT DO NOTHING = safe to call twice."""
+    """Persist RAG session to DB. Safe to call multiple times (ON CONFLICT DO NOTHING)."""
     with _conn() as con:
         cur = con.cursor()
         if USE_POSTGRES:
@@ -871,6 +1234,30 @@ def save_rag_session(
             )
 
 
+async def save_rag_session_async(
+    session_id: str,
+    user_id: int,
+    filename: str,
+    source_type: str = "pdf",
+    run_id: int | None = None,
+    workspace_id: int | None = None,
+) -> None:
+    """Persist RAG session to DB (async). Safe to call multiple times."""
+    if not _async_pool:
+        save_rag_session(session_id, user_id, filename, source_type, run_id, workspace_id)
+        return
+    async with _async_pool.acquire() as conn:
+        await conn.execute(
+            """
+            INSERT INTO rag_sessions
+                (id, user_id, filename, source_type, run_id, workspace_id, created_at)
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
+            ON CONFLICT (id) DO NOTHING
+            """,
+            session_id, user_id, filename, source_type, run_id, workspace_id, time.time(),
+        )
+
+
 def update_rag_session_status(
     session_id: str,
     status: str,
@@ -878,14 +1265,34 @@ def update_rag_session_status(
     chunk_count: int = 0,
     error_msg: str | None = None,
 ) -> None:
-    """Update RAG session status after ingestion completes (or fails)."""
+    """Update RAG session after PDF processing completes or fails."""
     with _conn() as con:
         cur = con.cursor()
         cur.execute(
-            _q(
-                "UPDATE rag_sessions SET status=?, page_count=?, chunk_count=?, error_msg=? WHERE id=?"
-            ),
+            _q("UPDATE rag_sessions SET status=?, page_count=?, chunk_count=?, error_msg=? WHERE id=?"),
             (status, page_count, chunk_count, error_msg, session_id),
+        )
+
+
+async def update_rag_session_status_async(
+    session_id: str,
+    status: str,
+    page_count: int = 0,
+    chunk_count: int = 0,
+    error_msg: str | None = None,
+) -> None:
+    """Update RAG session status (async)."""
+    if not _async_pool:
+        update_rag_session_status(session_id, status, page_count, chunk_count, error_msg)
+        return
+    async with _async_pool.acquire() as conn:
+        await conn.execute(
+            """
+            UPDATE rag_sessions
+            SET    status=$1, page_count=$2, chunk_count=$3, error_msg=$4
+            WHERE  id = $5
+            """,
+            status, page_count, chunk_count, error_msg, session_id,
         )
 
 
@@ -916,413 +1323,83 @@ def delete_rag_session_db(session_id: str) -> bool:
         return cur.rowcount > 0
 
 
-# ── Research History — Full Text Search ───────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════════════════
+# AGENTS
+# ═══════════════════════════════════════════════════════════════════════════════
 
-def search_runs(
-    user_id: int,
-    query: str,
-    limit: int = 20,
-) -> list[dict]:
-    """
-    Full-text search over research run topics and report content.
-    PostgreSQL: uses tsvector / plainto_tsquery with ts_rank ordering.
-    SQLite:     falls back to simple LIKE on topic and report.
-    """
-    if not query or not query.strip():
-        return []
-
-    q = query.strip()
-
-    if USE_POSTGRES:
-        sql = """
-            SELECT
-                id, topic, score, word_count, source_count, created_at,
-                LEFT(report, 300) AS excerpt,
-                ts_rank(
-                    to_tsvector('english', COALESCE(topic,'') || ' ' || COALESCE(report,'')),
-                    plainto_tsquery('english', %s)
-                ) AS rank
-            FROM runs
-            WHERE
-                user_id = %s
-                AND to_tsvector('english', COALESCE(topic,'') || ' ' || COALESCE(report,''))
-                    @@ plainto_tsquery('english', %s)
-            ORDER BY rank DESC, created_at DESC
-            LIMIT %s
-        """
-        with _conn() as con:
-            cur = con.cursor()
-            cur.execute(sql, (q, user_id, q, limit))
-            return _fetchall(cur)
-    else:
-        sql = (
-            "SELECT id, topic, score, word_count, source_count, created_at, "
-            "substr(report, 1, 300) AS excerpt "
-            "FROM runs WHERE user_id = ? AND (topic LIKE ? OR report LIKE ?) "
-            "ORDER BY created_at DESC LIMIT ?"
+def create_agent(owner_id: int, name: str, system_prompt: str, tools: list[str], model: str) -> int:
+    """Create a custom AI agent. Returns its id."""
+    tools_str = ",".join(tools)
+    with _conn() as con:
+        cur = con.cursor()
+        cur.execute(
+            _q("INSERT INTO agents (owner_id, name, system_prompt, tools, model, created_at) VALUES (?,?,?,?,?,?)"),
+            (owner_id, name, system_prompt, tools_str, model, time.time()),
         )
-        with _conn() as con:
-            cur = con.cursor()
-            like = f"%{q}%"
-            cur.execute(sql, (user_id, like, like, limit))
-            return _fetchall(cur)
+        if USE_POSTGRES:
+            cur.execute("SELECT lastval()")
+            return cur.fetchone()[0]
+        return cur.lastrowid
 
-# ══════════════════════════════════════════════════════════════════════════════
-# ASYNC DATABASE LAYER — Phase 2 upgrade
-# ══════════════════════════════════════════════════════════════════════════════
 
-import json as _json   # already imported above as alias — safe to repeat
+def delete_agent(agent_id: int) -> bool:
+    """Delete an agent. Returns True if deleted."""
+    with _conn() as con:
+        cur = con.cursor()
+        cur.execute(_q("DELETE FROM agents WHERE id = ?"), (agent_id,))
+        return cur.rowcount > 0
 
-# ── Runs ──────────────────────────────────────────────────────────────────────
 
-async def get_run_async(run_id: int) -> dict | None:
-    """Async version of get_run(). Returns one run dict or None."""
-    if not _async_pool:
-        return get_run(run_id)
-    async with _async_pool.acquire() as conn:
-        row = await conn.fetchrow(
-            "SELECT * FROM runs WHERE id = $1",
-            run_id,
+def get_agents_by_user(owner_id: int) -> list[dict]:
+    """Return all agents for a user with tools parsed to list."""
+    with _conn() as con:
+        cur = con.cursor()
+        cur.execute(
+            _q("SELECT * FROM agents WHERE owner_id = ? ORDER BY created_at DESC"),
+            (owner_id,),
         )
-    return dict(row) if row else None
+        rows = _fetchall(cur)
+    for d in rows:
+        d["tools"] = d["tools"].split(",") if d.get("tools") else []
+    return rows
 
 
-async def delete_run_async(run_id: int) -> bool:
-    """Async version of delete_run(). Returns True if a row was deleted."""
-    if not _async_pool:
-        return delete_run(run_id)
-    async with _async_pool.acquire() as conn:
-        result = await conn.execute(
-            "DELETE FROM runs WHERE id = $1",
-            run_id,
+def get_agent_by_id(agent_id: int) -> dict | None:
+    """Return one agent by id with tools parsed to list."""
+    with _conn() as con:
+        cur = con.cursor()
+        cur.execute(_q("SELECT * FROM agents WHERE id = ?"), (agent_id,))
+        d = _fetchone(cur)
+    if not d:
+        return None
+    d["tools"] = d["tools"].split(",") if d.get("tools") else []
+    return d
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# SUPPORT TICKETS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def create_support_ticket(name: str, email: str, subject: str, message: str) -> int:
+    """Save a support ticket. Returns its id."""
+    with _conn() as con:
+        cur = con.cursor()
+        cur.execute(
+            _q("INSERT INTO support_tickets (name, email, subject, message, created_at) VALUES (?,?,?,?,?)"),
+            (name, email, subject, message, time.time()),
         )
-    return result.split()[-1] != "0"
+        if USE_POSTGRES:
+            cur.execute("SELECT lastval()")
+            return cur.fetchone()[0]
+        return cur.lastrowid
 
 
-async def search_runs_async(
-    user_id: int,
-    query:   str,
-    limit:   int = 20,
-) -> list[dict]:
-    """Async full-text search over research runs."""
-    if not _async_pool:
-        return search_runs(user_id, query, limit)
-    async with _async_pool.acquire() as conn:
-        rows = await conn.fetch(
-            """
-            SELECT id, topic, score, word_count, created_at,
-                   SUBSTRING(report, 1, 300) AS excerpt
-            FROM   runs
-            WHERE  user_id = $1
-              AND  (
-                     to_tsvector('english', topic || ' ' || report)
-                     @@ plainto_tsquery('english', $2)
-                     OR topic ILIKE $3
-                   )
-            ORDER  BY created_at DESC
-            LIMIT  $4
-            """,
-            user_id, query, f"%{query}%", limit,
+def get_support_tickets(limit: int = 100) -> list[dict]:
+    """Return recent support tickets."""
+    with _conn() as con:
+        cur = con.cursor()
+        cur.execute(
+            _q("SELECT * FROM support_tickets ORDER BY created_at DESC LIMIT ?"),
+            (limit,),
         )
-    return [dict(row) for row in rows]
-
-
-# ── Users ─────────────────────────────────────────────────────────────────────
-
-async def get_user_by_email_async(email: str) -> dict | None:
-    """Async version of get_user_by_email()."""
-    if not _async_pool:
-        return get_user_by_email(email)
-    async with _async_pool.acquire() as conn:
-        row = await conn.fetchrow(
-            "SELECT * FROM users WHERE email = $1",
-            email,
-        )
-    return dict(row) if row else None
-
-
-async def get_user_full_async(user_id: int) -> dict | None:
-    """Async version of get_user_full(). Called on every /api/auth/me request."""
-    if not _async_pool:
-        return get_user_full(user_id)
-    async with _async_pool.acquire() as conn:
-        row = await conn.fetchrow(
-            """
-            SELECT id, email, username, city, default_topic, created_at
-            FROM   users
-            WHERE  id = $1
-            """,
-            user_id,
-        )
-    return dict(row) if row else None
-
-
-async def create_user_async(
-    email:         str,
-    username:      str,
-    password_hash: str,
-) -> int:
-    """Async version of create_user(). Returns the new user's id."""
-    if not _async_pool:
-        return create_user(email, username, password_hash)
-    async with _async_pool.acquire() as conn:
-        user_id = await conn.fetchval(
-            """
-            INSERT INTO users (email, username, password_hash, created_at)
-            VALUES ($1, $2, $3, $4)
-            RETURNING id
-            """,
-            email, username, password_hash, time.time(),
-        )
-    return user_id
-
-
-async def update_user_profile_async(
-    user_id:       int,
-    city:          str | None = None,
-    default_topic: str | None = None,
-) -> bool:
-    """Async version of update_user_profile(). Only updates provided fields."""
-    if not _async_pool:
-        return update_user_profile(user_id, city=city, default_topic=default_topic)
-    updates = []
-    values  = []
-    if city is not None:
-        updates.append(f"city = ${len(values)+1}")
-        values.append(city.strip())
-    if default_topic is not None:
-        updates.append(f"default_topic = ${len(values)+1}")
-        values.append(default_topic.strip())
-    if not updates:
-        return False
-    updates.append(f"updated_at = ${len(values)+1}")
-    values.append(time.time())
-    values.append(user_id)
-    async with _async_pool.acquire() as conn:
-        result = await conn.execute(
-            f"UPDATE users SET {', '.join(updates)} WHERE id = ${len(values)}",
-            *values,
-        )
-    return result.split()[-1] != "0"
-
-
-# ── Workspaces ────────────────────────────────────────────────────────────────
-
-async def get_workspaces_async(user_id: int) -> list[dict]:
-    """Async version of get_workspaces()."""
-    if not _async_pool:
-        return get_workspaces(user_id)
-    async with _async_pool.acquire() as conn:
-        rows = await conn.fetch(
-            """
-            SELECT id, user_id, name, topic, description, created_at, updated_at
-            FROM   workspaces
-            WHERE  user_id = $1
-            ORDER  BY updated_at DESC NULLS LAST, created_at DESC
-            """,
-            user_id,
-        )
-    return [dict(row) for row in rows]
-
-
-async def create_workspace_async(
-    user_id:     int,
-    name:        str,
-    topic:       str,
-    description: str = "",
-) -> int:
-    """Async version of create_workspace(). Returns new workspace id."""
-    if not _async_pool:
-        return create_workspace(user_id, name, topic, description)
-    async with _async_pool.acquire() as conn:
-        wid = await conn.fetchval(
-            """
-            INSERT INTO workspaces (user_id, name, topic, description, created_at)
-            VALUES ($1, $2, $3, $4, $5)
-            RETURNING id
-            """,
-            user_id, name.strip(), topic.strip(), description.strip(), time.time(),
-        )
-    return wid
-
-
-async def delete_workspace_async(workspace_id: int) -> bool:
-    """Async version of delete_workspace()."""
-    if not _async_pool:
-        return delete_workspace(workspace_id)
-    async with _async_pool.acquire() as conn:
-        result = await conn.execute(
-            "DELETE FROM workspaces WHERE id = $1",
-            workspace_id,
-        )
-    return result.split()[-1] != "0"
-
-
-async def get_workspace_async(workspace_id: int) -> dict | None:
-    """Async version of get_workspace(). Used for ownership check before delete."""
-    if not _async_pool:
-        return get_workspace(workspace_id)
-    async with _async_pool.acquire() as conn:
-        row = await conn.fetchrow(
-            "SELECT * FROM workspaces WHERE id = $1",
-            workspace_id,
-        )
-    return dict(row) if row else None
-
-
-# ── Activity ──────────────────────────────────────────────────────────────────
-
-async def log_activity_async(
-    user_id:      int,
-    event_type:   str,
-    payload:      dict,
-    workspace_id: int | None = None,
-) -> None:
-    """Async version of log_activity(). Fire-and-forget — never raises, never blocks."""
-    if not _async_pool:
-        log_activity(user_id, event_type, payload, workspace_id)
-        return
-    try:
-        async with _async_pool.acquire() as conn:
-            await conn.execute(
-                """
-                INSERT INTO activity_events
-                    (user_id, event_type, payload, workspace_id, created_at)
-                VALUES ($1, $2, $3, $4, $5)
-                """,
-                user_id, event_type, _json.dumps(payload), workspace_id, time.time(),
-            )
-    except Exception as exc:
-        print(f"[Activity] Failed to log '{event_type}' for user {user_id}: {exc}")
-
-
-async def get_activity_async(user_id: int, limit: int = 20) -> list[dict]:
-    """Async version of get_activity(). Powers the Dashboard activity feed."""
-    if not _async_pool:
-        return get_activity(user_id, limit)
-    async with _async_pool.acquire() as conn:
-        rows = await conn.fetch(
-            """
-            SELECT id, event_type, payload, workspace_id, created_at
-            FROM   activity_events
-            WHERE  user_id = $1
-            ORDER  BY created_at DESC
-            LIMIT  $2
-            """,
-            user_id, limit,
-        )
-    result = [dict(row) for row in rows]
-    for row in result:
-        if isinstance(row.get("payload"), str):
-            try:
-                row["payload"] = _json.loads(row["payload"])
-            except (ValueError, TypeError):
-                row["payload"] = {}
-    return result
-
-
-# ── News tracked topics ───────────────────────────────────────────────────────
-
-async def get_tracked_topics_async(user_id: int) -> list[dict]:
-    """Async version of get_tracked_topics(). Powers the News page sidebar."""
-    if not _async_pool:
-        return get_tracked_topics(user_id)
-    async with _async_pool.acquire() as conn:
-        rows = await conn.fetch(
-            """
-            SELECT * FROM news_tracked_topics
-            WHERE  user_id = $1
-            ORDER  BY created_at DESC
-            """,
-            user_id,
-        )
-    return [dict(row) for row in rows]
-
-
-async def track_news_topic_async(
-    user_id:      int,
-    topic:        str,
-    category:     str = "general",
-    workspace_id: int | None = None,
-) -> int:
-    """Async version of track_news_topic(). ON CONFLICT DO NOTHING = safe to call twice."""
-    if not _async_pool:
-        return track_news_topic(user_id, topic, category, workspace_id)
-    async with _async_pool.acquire() as conn:
-        await conn.execute(
-            """
-            INSERT INTO news_tracked_topics
-                (user_id, topic, category, workspace_id, created_at)
-            VALUES ($1, $2, $3, $4, $5)
-            ON CONFLICT (user_id, topic, category) DO NOTHING
-            """,
-            user_id, topic.strip(), category.strip(), workspace_id, time.time(),
-        )
-        row = await conn.fetchrow(
-            """
-            SELECT id FROM news_tracked_topics
-            WHERE user_id = $1 AND topic = $2 AND category = $3
-            """,
-            user_id, topic.strip(), category.strip(),
-        )
-    return row["id"] if row else 0
-
-
-async def delete_tracked_topic_async(topic_id: int) -> bool:
-    """Async version of delete_tracked_topic()."""
-    if not _async_pool:
-        return delete_tracked_topic(topic_id)
-    async with _async_pool.acquire() as conn:
-        result = await conn.execute(
-            "DELETE FROM news_tracked_topics WHERE id = $1",
-            topic_id,
-        )
-    return result.split()[-1] != "0"
-
-
-# ── RAG sessions ──────────────────────────────────────────────────────────────
-
-async def save_rag_session_async(
-    session_id:   str,
-    user_id:      int,
-    filename:     str,
-    source_type:  str = "pdf",
-    run_id:       int | None = None,
-    workspace_id: int | None = None,
-) -> None:
-    """Async version of save_rag_session(). ON CONFLICT DO NOTHING = safe to call multiple times."""
-    if not _async_pool:
-        save_rag_session(session_id, user_id, filename, source_type, run_id, workspace_id)
-        return
-    async with _async_pool.acquire() as conn:
-        await conn.execute(
-            """
-            INSERT INTO rag_sessions
-                (id, user_id, filename, source_type, run_id, workspace_id, created_at)
-            VALUES ($1, $2, $3, $4, $5, $6, $7)
-            ON CONFLICT (id) DO NOTHING
-            """,
-            session_id, user_id, filename, source_type, run_id, workspace_id, time.time(),
-        )
-
-
-async def update_rag_session_status_async(
-    session_id:  str,
-    status:      str,
-    page_count:  int = 0,
-    chunk_count: int = 0,
-    error_msg:   str | None = None,
-) -> None:
-    """Async version of update_rag_session_status(). Called after PDF ingestion completes."""
-    if not _async_pool:
-        update_rag_session_status(session_id, status, page_count, chunk_count, error_msg)
-        return
-    async with _async_pool.acquire() as conn:
-        await conn.execute(
-            """
-            UPDATE rag_sessions
-            SET    status=$1, page_count=$2, chunk_count=$3, error_msg=$4
-            WHERE  id = $5
-            """,
-            status, page_count, chunk_count, error_msg, session_id,
-        )
+        return _fetchall(cur)

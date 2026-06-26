@@ -17,15 +17,17 @@ export default function LoginPage() {
     e.preventDefault()
     setError('')
     setLoading(true)
-    try {
-      const data = await authApi.login(email, password)
-      login(data.token, data.user)
+
+    const result = await authApi.login(email, password)
+
+    if (result.ok) {
+      login(result.data.token, result.data.user)
       navigate('/dashboard', { replace: true })
-    } catch (err) {
-      setError(err.message)
-    } finally {
-      setLoading(false)
+    } else {
+      setError(result.error || 'Login failed — please check your credentials')
     }
+
+    setLoading(false)
   }
 
   return (

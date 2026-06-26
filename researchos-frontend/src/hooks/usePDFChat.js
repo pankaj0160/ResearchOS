@@ -40,10 +40,11 @@ export function usePDFChat() {
     try {
       // Step 1: upload the file — returns immediately with status="processing"
       const meta = await ragApi.upload(file, pct => setUploadProgress(pct))
+      console.log('upload meta:', meta)   // ← ADD THIS LINE
 
       // Step 2: poll until ingestion is done
       setUploadProgress(10)
-      const ready = await ragApi.pollStatus(meta.session_id, pct => setUploadProgress(pct))
+      const ready = await ragApi.getStatus(meta.data.session_id, pct => setUploadProgress(pct))
 
       // Step 3: session is ready — set it with full metadata
       setUploadProgress(100)
@@ -62,7 +63,7 @@ export function usePDFChat() {
   // ── Load existing sessions ────────────────────────────────────────────────
   const loadSessions = useCallback(async () => {
     try {
-      const data = await ragApi.listSessions()
+      const data = await ragApi.getSessions()
       setSessions(data.sessions ?? [])
     } catch { /* silent */ }
   }, [])
@@ -111,7 +112,7 @@ export function usePDFChat() {
     setMessages(prev => [...prev, asstMsg])
     setResponding(true)
 
-    await ragApi.chat(session.session_id, question.trim(), {
+    await ragApi.streamChat(session.session_id, question.trim(), {
       onSources(sources) {
         setMessages(prev => prev.map(m =>
           m.id === asstId ? { ...m, sources } : m

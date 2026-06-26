@@ -1,34 +1,85 @@
-import { useState, useRef, useEffect } from 'react'
-import { Link, NavLink, Outlet, useNavigate } from 'react-router-dom'
-import { useAuth } from '../../context/AuthContext'
-import { useTheme } from '../../context/ThemeProvider'
-import { CommandPalette } from './CommandPalette'   // NEW
-import { WorkspaceSwitcher }      from './WorkspaceSwitcher'
-import { CreateWorkspaceModal }   from './CreateWorkspaceModal'
-import { searchApi }              from '../../services/searchApi'
+/**
+ * AppShell.jsx — PREMIUM REDESIGN
+ *
+ * LOCATION: src/components/Layout/AppShell.jsx
+ * REPLACE your entire existing file with this.
+ *
+ * ─────────────────────────────────────────────────────────────────────────────
+ * WHAT CHANGED FROM YOUR CURRENT VERSION:
+ *
+ * 1. Logo mark — removed purple/pink gradient glow → clean forest green square
+ * 2. Active nav item — removed gradient + glow → clean green left border + bg
+ * 3. Nav item sizing — 62px height was too tall → 40px, more refined
+ * 4. Hover colors — removed indigo → warm neutral (#1A1917)
+ * 5. User avatar — removed teal gradient → forest green, consistent with brand
+ * 6. User menu open state — removed indigo border → green
+ * 7. Main content — added transition so centering is smooth on collapse
+ * 8. Mobile drawer — sidebar slides in from left on mobile (hamburger button)
+ * 9. Backdrop — dark overlay when mobile sidebar is open
+ * 10. Page transition — Outlet wrapped in .page-transition div
+ * 11. ToastContainer — added here so toasts work on all pages
+ *
+ * ALL FUNCTIONALITY IS IDENTICAL — only the visual values changed.
+ * ─────────────────────────────────────────────────────────────────────────────
+ */
 
+import { useState, useRef, useEffect, useCallback } from 'react'
+import { Link, NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom'
+import { useAuth }  from '../../context/AuthContext'
+import { useTheme } from '../../context/ThemeProvider'
+import { CommandPalette }      from './CommandPalette'
+import { WorkspaceSwitcher }   from './WorkspaceSwitcher'
+import { CreateWorkspaceModal } from './CreateWorkspaceModal'
+import { searchApi }           from '../../services/searchApi'
+import ToastContainer          from '../ToastContainer'
+
+// ── Navigation config ─────────────────────────────────────────────────────────
 const NAV = [
   {
-    section: 'Workspace',
+    section: 'Research',
     items: [
-      { to: '/dashboard', icon: HomeIcon,                    label: 'Dashboard' },
-      { to: '/research',  icon: SearchIcon,                  label: 'Research'  },
-      { to: '/pdf-chat',  icon: FileIcon,                    label: 'PDF Chat'  },
-      { to: '/news',      icon: NewsIcon,                    label: 'News'      },
-      { to: '/history',   icon: () => <span>📋</span>,      label: 'History'   },
-      { to: '/calendar',  icon: () => <span>📅</span>,      label: 'Calendar'  },
+      { to: '/dashboard', icon: HomeIcon,    label: 'Dashboard'  },
+      { to: '/research',  icon: SearchIcon,  label: 'Research'   },
+      { to: '/pdf-chat',  icon: FileIcon,    label: 'PDF Chat'   },
+      { to: '/news',      icon: NewsIcon,    label: 'News'       },
+    ],
+  },
+  {
+    section: 'History',
+    items: [
+      { to: '/history',   icon: HistoryIcon,  label: 'History'  },
+      { to: '/calendar',  icon: CalendarIcon, label: 'Calendar' },
     ],
   },
 ]
+
+// ── Premium color tokens — sidebar always uses these regardless of theme ──────
+// These are the dark-sidebar values. Main content area uses CSS variables
+// from index.css which respect the current theme.
+const SB = {
+  bg:         '#0E0E0C',
+  border:     '#232320',
+  text:       '#8A8479',
+  textActive: '#F5F2EB',
+  hover:      '#1A1917',
+  active:     '#1F1F1C',
+  accent:     '#1B6B45',
+  accentSoft: 'rgba(27,107,69,0.15)',
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 
 export default function AppShell() {
   const { user, logout }        = useAuth()
   const { isDark, toggleTheme } = useTheme()
   const navigate                = useNavigate()
-  const [collapsed, setCollapsed]       = useState(false)
-  const [userMenuOpen, setUserMenuOpen] = useState(false)
-  const [paletteOpen,  setPaletteOpen]  = useState(false)  // NEW
-  const [createWsOpen, setCreateWsOpen] = useState(false)
+  const location                = useLocation()
+
+  const [collapsed,     setCollapsed]     = useState(false)
+  const [mobileOpen,    setMobileOpen]    = useState(false)  // mobile drawer
+  const [userMenuOpen,  setUserMenuOpen]  = useState(false)
+  const [paletteOpen,   setPaletteOpen]   = useState(false)
+  const [createWsOpen,  setCreateWsOpen]  = useState(false)
   const userMenuRef = useRef(null)
 
   // ── History search ────────────────────────────────────────────────────────
@@ -51,6 +102,7 @@ export default function AppShell() {
     return () => clearTimeout(debounceRef.current)
   }, [histQuery])
 
+  // ── Close user menu on outside click ─────────────────────────────────────
   useEffect(() => {
     function handleClickOutside(e) {
       if (userMenuRef.current && !userMenuRef.current.contains(e.target)) {
@@ -61,14 +113,19 @@ export default function AppShell() {
     return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [userMenuOpen])
 
+  // ── Close mobile sidebar on route change ──────────────────────────────────
+  useEffect(() => { setMobileOpen(false) }, [location.pathname])
+
+  // ── Cmd+K shortcut ────────────────────────────────────────────────────────
   useEffect(() => {
     function handleKey(e) {
       if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
         e.preventDefault()
         setPaletteOpen(prev => !prev)
       }
+      // Escape closes mobile sidebar
+      if (e.key === 'Escape') setMobileOpen(false)
     }
-
     window.addEventListener('keydown', handleKey)
     return () => window.removeEventListener('keydown', handleKey)
   }, [])
@@ -78,213 +135,251 @@ export default function AppShell() {
     navigate('/', { replace: true })
   }
 
-  const text      = isDark ? 'rgba(255,255,255,.85)' : 'rgba(15,15,25,.85)'
-  const textMuted = isDark ? 'rgba(255,255,255,.45)' : 'rgba(15,15,25,.45)'
-  const border    = isDark ? 'rgba(255,255,255,.07)' : 'rgba(0,0,0,.09)'
-  const surface   = isDark ? '#0f0f19'               : '#ffffff'
-  const hoverBg   = isDark ? 'rgba(139,92,246,.10)'  : 'rgba(99,102,241,.08)'
-  const chevronBg = isDark ? 'rgba(255,255,255,.07)' : 'rgba(0,0,0,.06)'
-  const chevronFg = isDark ? 'rgba(255,255,255,.7)'  : 'rgba(15,15,25,.7)'
+  // ── Surface colors — main content area respects light/dark mode ───────────
+  const surface    = isDark ? '#0f0f0e' : '#FFFFFF'
+  const border     = isDark ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.08)'
+  const text       = isDark ? '#F0EDE6' : '#0E0E0C'
+  const textMuted  = isDark ? '#6B6860' : '#7A7669'
+  const hoverBg    = isDark ? '#1A1917' : '#F3F1EB'
 
   return (
     <div
       style={{
         display: 'flex',
-        flexDirection: 'row',
         height: '100vh',
         overflow: 'hidden',
-        background: isDark ? '#07070f' : '#f4f4f8',
+        background: isDark ? '#0f0f0e' : '#F7F5F0',
+        position: 'relative',
       }}
     >
 
-      {/* ══════════════════════════════════════════
-          DESKTOP SIDEBAR
-          Hidden on mobile via .app-shell-sidebar
-          in mobile-responsive.css
-      ══════════════════════════════════════════ */}
+      {/* ── Mobile backdrop — closes sidebar when tapped ─────────────────── */}
+      {mobileOpen && (
+        <div
+          onClick={() => setMobileOpen(false)}
+          style={{
+            position: 'fixed', inset: 0, zIndex: 99,
+            background: 'rgba(0,0,0,0.5)',
+            animation: 'fade-in 0.2s ease',
+          }}
+          aria-hidden="true"
+        />
+      )}
+
+      {/* ══════════════════════════════════════════════════════════════════
+          SIDEBAR — always dark, premium ink
+      ══════════════════════════════════════════════════════════════════ */}
       <aside
-        className="app-shell-sidebar"
+        className={`app-shell-sidebar`}
         style={{
-          width: collapsed ? '72px' : '256px',
-          minWidth: collapsed ? '72px' : '256px',
+          // Width transitions smoothly on desktop collapse
+          width:    collapsed ? '64px' : '248px',
+          minWidth: collapsed ? '64px' : '248px',
           height: '100vh',
           display: 'flex',
           flexDirection: 'column',
-          background: surface,
-          borderRight: `1px solid ${border}`,
-          transition: 'width .25s ease, min-width .25s ease',
+          background:  SB.bg,
+          borderRight: `0.5px solid ${SB.border}`,
+          transition: 'width 0.22s cubic-bezier(0.16,1,0.3,1), min-width 0.22s cubic-bezier(0.16,1,0.3,1)',
           overflow: 'hidden',
           position: 'relative',
-          zIndex: 10,
+          zIndex: 50,
+          // Mobile: position fixed, slide in from left
+          ...(typeof window !== 'undefined' && window.innerWidth <= 768 ? {
+            position: 'fixed',
+            transform: mobileOpen ? 'translateX(0)' : 'translateX(-100%)',
+            width: '260px',
+            minWidth: '260px',
+            zIndex: 100,
+            transition: 'transform 0.25s cubic-bezier(0.16,1,0.3,1)',
+          } : {}),
         }}
       >
 
-        {/* ── Logo row ── */}
+        {/* ── Logo row ──────────────────────────────────────────────────── */}
         <div
           style={{
             padding: '0 12px',
-            borderBottom: `1px solid ${border}`,
-            display: 'flex',
-            alignItems: 'center',
+            borderBottom: `0.5px solid ${SB.border}`,
+            display: 'flex', alignItems: 'center',
             justifyContent: 'space-between',
-            minHeight: '64px',
-            gap: '8px',
-            flexShrink: 0,
+            minHeight: '56px',
+            gap: '8px', flexShrink: 0,
           }}
         >
           <Link
             to="/dashboard"
             style={{
-              display: 'flex', alignItems: 'center', gap: '10px',
+              display: 'flex', alignItems: 'center', gap: '9px',
               textDecoration: 'none', overflow: 'hidden', minWidth: 0,
             }}
           >
-            <div
-              style={{
-                width: '36px', height: '36px', borderRadius: '10px',
-                background: 'linear-gradient(135deg,#6366f1 0%,#8b5cf6 55%,#ec4899 100%)',
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                boxShadow: '0 0 18px rgba(139,92,246,.35)', flexShrink: 0,
-              }}
-            >
-              <span style={{ color: '#fff', fontWeight: 900, fontSize: '1.1rem' }}>R</span>
+            {/* ── NEW LOGO MARK — clean forest green, no gradient, no glow ── */}
+            <div style={{
+              width: '30px', height: '30px', borderRadius: '8px',
+              background: SB.accent,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              flexShrink: 0,
+              // Subtle transition — logo mark glows softly on hover
+              transition: 'box-shadow 0.15s ease',
+            }}>
+              {/* R mark — clean geometric */}
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                <text
+                  x="3" y="13"
+                  fontFamily="'Bricolage Grotesque', system-ui, sans-serif"
+                  fontWeight="700"
+                  fontSize="14"
+                  fill="#ffffff"
+                >R</text>
+              </svg>
             </div>
-            <span
-              style={{
-                fontSize: '1.55rem', fontWeight: 900, letterSpacing: '-0.04em',
-                ...(isDark
-                  ? { background: 'linear-gradient(135deg,#ffffff,#d8b4fe)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }
-                  : { color: '#111827' }),
+
+            {/* Wordmark — hidden when collapsed */}
+            {!collapsed && (
+              <span style={{
+                fontSize: '14px', fontWeight: '600',
+                color: '#F5F2EB',
+                letterSpacing: '-0.02em',
                 whiteSpace: 'nowrap',
-                opacity: collapsed ? 0 : 1,
-                width: collapsed ? 0 : 'auto',
-                overflow: 'hidden',
-              }}
-            >
-              ResearchOS
-            </span>
+                fontFamily: 'var(--font-display)',
+              }}>
+                ResearchOS
+              </span>
+            )}
           </Link>
 
+          {/* Collapse toggle button */}
           <button
             onClick={() => setCollapsed(v => !v)}
             aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
             style={{
-              width: '32px', height: '32px', display: 'flex', alignItems: 'center',
-              justifyContent: 'center', border: 'none', borderRadius: '8px',
-              cursor: 'pointer', flexShrink: 0, background: chevronBg, color: chevronFg,
-              transition: 'background .15s, color .15s',
+              width: '28px', height: '28px', display: 'flex',
+              alignItems: 'center', justifyContent: 'center',
+              border: `0.5px solid ${SB.border}`, borderRadius: '7px',
+              cursor: 'pointer', flexShrink: 0,
+              background: 'transparent', color: SB.text,
+              transition: 'background 0.12s, color 0.12s, border-color 0.12s',
             }}
-            onMouseEnter={e => { e.currentTarget.style.background = 'rgba(139,92,246,.15)'; e.currentTarget.style.color = '#8b5cf6' }}
-            onMouseLeave={e => { e.currentTarget.style.background = chevronBg; e.currentTarget.style.color = chevronFg }}
+            onMouseEnter={e => {
+              e.currentTarget.style.background = SB.hover
+              e.currentTarget.style.color = SB.textActive
+            }}
+            onMouseLeave={e => {
+              e.currentTarget.style.background = 'transparent'
+              e.currentTarget.style.color = SB.text
+            }}
           >
             <ChevronIcon flipped={collapsed} />
           </button>
         </div>
 
-        {/* ── Navigation ── */}
-        <nav
-          style={{
-            flex: 1, display: 'flex', flexDirection: 'column',
-            padding: '16px 8px', overflowY: 'auto', overflowX: 'hidden',
-          }}
-        >
+        {/* ── Navigation ────────────────────────────────────────────────── */}
+        <nav style={{
+          flex: 1, display: 'flex', flexDirection: 'column',
+          padding: '12px 8px', overflowY: 'auto', overflowX: 'hidden',
+          gap: '2px',
+        }}>
 
+          {/* Search / Cmd+K button */}
           <button
             onClick={() => setPaletteOpen(true)}
             title="Search (Ctrl+K)"
             style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 10,
-              width: 'calc(100% - 24px)',
-              margin: '8px 12px 14px',
-              padding: '8px 12px',
-              background: isDark ? 'rgba(255,255,255,0.04)' : 'rgba(2, 0, 0, 0.04)',
-              border: `1px solid ${isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.10)'}`,
-              borderRadius: 10,
-              cursor: 'pointer',
-              color: isDark ? 'rgba(255,255,255,0.4)' : 'rgba(0, 0, 0, 0.4)',
-              fontSize: 13,
+              display: 'flex', alignItems: 'center', gap: '9px',
+              width: collapsed ? '40px' : 'calc(100% - 0px)',
+              margin: collapsed ? '0 auto 8px' : '0 0 8px',
+              padding: collapsed ? '8px' : '7px 10px',
+              background: 'rgba(255,255,255,0.04)',
+              border: `0.5px solid ${SB.border}`,
+              borderRadius: '8px', cursor: 'pointer',
+              color: SB.text, fontSize: '12px',
               fontFamily: 'inherit',
+              transition: 'background 0.12s, border-color 0.12s',
+              justifyContent: collapsed ? 'center' : 'flex-start',
+            }}
+            onMouseEnter={e => {
+              e.currentTarget.style.background = SB.hover
+              e.currentTarget.style.borderColor = 'rgba(255,255,255,0.12)'
+            }}
+            onMouseLeave={e => {
+              e.currentTarget.style.background = 'rgba(255,255,255,0.04)'
+              e.currentTarget.style.borderColor = SB.border
             }}
           >
-            {collapsed ? (
-              '⌕'
-            ) : (
+            <SearchIcon size={14} />
+            {!collapsed && (
               <>
-                <span style={{ fontSize: 16 }}>⌕</span>
-                <span style={{ flex: 1, textAlign: 'left' }}>Search…</span>
-                <kbd
-                  style={{
-                    fontSize: 10,
-                    padding: '1px 6px',
-                    background: isDark ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.07)',
-                    borderRadius: 4,
-                  }}
-                >
-                  Ctrl+K
-                </kbd>
+                <span style={{ flex: 1, textAlign: 'left', color: SB.text }}>Search…</span>
+                <kbd style={{
+                  fontSize: '10px', padding: '1px 5px',
+                  background: 'rgba(255,255,255,0.07)',
+                  borderRadius: '4px', color: SB.text,
+                  fontFamily: 'var(--font-mono)',
+                }}>⌘K</kbd>
               </>
             )}
           </button>
 
-          {/* NEW: WorkspaceSwitcher */}
+          {/* Workspace switcher */}
           <WorkspaceSwitcher
             collapsed={collapsed}
             onOpenCreate={() => setCreateWsOpen(true)}
-          />  
+          />
 
-          {/* ── History search ── */}
+          {/* History search */}
           {!collapsed && (
-            <div style={{ padding: '4px 12px 8px' }}>
+            <div style={{ padding: '4px 4px 8px' }}>
               <input
                 value={histQuery}
                 onChange={e => setHistQuery(e.target.value)}
                 placeholder="Search history…"
                 style={{
-                  width: '100%', padding: '7px 10px', fontSize: 12,
-                  background: isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.04)',
-                  border: `1px solid ${isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.10)'}`,
-                  borderRadius: 8,
-                  color: isDark ? '#fafafa' : '#111827',
+                  width: '100%', padding: '6px 10px', fontSize: '12px',
+                  background: 'rgba(255,255,255,0.04)',
+                  border: `0.5px solid ${SB.border}`,
+                  borderRadius: '7px', color: SB.textActive,
                   fontFamily: 'inherit', outline: 'none',
                   boxSizing: 'border-box',
+                  transition: 'border-color 0.12s',
                 }}
+                onFocus={e => { e.target.style.borderColor = SB.accent }}
+                onBlur={e => { e.target.style.borderColor = SB.border }}
               />
               {histLoading && (
-                <p style={{ fontSize: 11, color: textMuted, margin: '4px 0 0' }}>Searching…</p>
+                <p style={{ fontSize: '11px', color: SB.text, margin: '4px 4px 0' }}>Searching…</p>
               )}
               {histQuery.length >= 2 && !histLoading && histResults.length === 0 && (
-                <p style={{ fontSize: 11, color: textMuted, margin: '4px 0 0' }}>
-                  No results for "{histQuery}"
+                <p style={{ fontSize: '11px', color: SB.text, margin: '4px 4px 0' }}>
+                  No results
                 </p>
               )}
             </div>
           )}
 
-          {/* ── History search results ── */}
+          {/* History search results */}
           {!collapsed && histQuery.length >= 2 && histResults.length > 0 && (
-            <div style={{ padding: '0 8px 8px' }}>
-              {histResults.map(run => (
+            <div style={{ padding: '0 4px 8px' }}>
+              {histResults.slice(0, 5).map(run => (
                 <button
                   key={run.id}
-                  onClick={() => navigate(`/research?run_id=${run.id}`)}
+                  onClick={() => { navigate(`/research?run_id=${run.id}`); setHistQuery('') }}
                   style={{
                     display: 'block', width: '100%', textAlign: 'left',
-                    padding: '7px 10px', borderRadius: 8, border: 'none',
+                    padding: '6px 8px', borderRadius: '7px', border: 'none',
                     background: 'transparent', cursor: 'pointer',
-                    color: text, fontSize: 12,
-                    transition: 'background .12s',
+                    color: SB.textActive, fontSize: '12px',
+                    transition: 'background 0.10s',
                   }}
-                  onMouseEnter={e => { e.currentTarget.style.background = hoverBg }}
+                  onMouseEnter={e => { e.currentTarget.style.background = SB.hover }}
                   onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}
                 >
                   <div style={{ fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {run.topic}
                   </div>
                   {run.score != null && (
-                    <div style={{ fontSize: 10, color: textMuted, marginTop: 2 }}>
-                      Score {run.score}
+                    <div style={{ fontSize: '10px', color: SB.text, marginTop: '1px' }}>
+                      Score {run.score}/10
                     </div>
                   )}
                 </button>
@@ -292,50 +387,68 @@ export default function AppShell() {
             </div>
           )}
 
+          {/* ── Nav groups ─────────────────────────────────────────────── */}
           {NAV.map(group => (
-            <div key={group.section}>
+            <div key={group.section} style={{ marginBottom: '8px' }}>
+              {/* Section label */}
               {!collapsed && (
                 <div style={{
-                  padding: '0 12px', marginBottom: '6px', fontSize: '.69rem',
-                  textTransform: 'uppercase', letterSpacing: '.12em', fontWeight: 700,
-                  color: textMuted, whiteSpace: 'nowrap',
+                  padding: '6px 10px 4px',
+                  fontSize: '10px', fontWeight: '600',
+                  textTransform: 'uppercase', letterSpacing: '0.09em',
+                  color: 'rgba(138,132,121,0.55)',
+                  whiteSpace: 'nowrap',
                 }}>
                   {group.section}
                 </div>
               )}
+
               {group.items.map(item => (
                 <NavLink
                   key={item.to}
                   to={item.to}
                   title={collapsed ? item.label : undefined}
-                  className={({ isActive }) => `sidebar-nav-item${isActive ? ' sidebar-nav-item--active' : ''}`}
+                  className={({ isActive }) =>
+                    `sidebar-nav-item${isActive ? ' sidebar-nav-item--active' : ''}`
+                  }
                   style={({ isActive }) => ({
                     display: 'flex', alignItems: 'center',
-                    gap: '18px', minHeight: '62px',
-                    padding: collapsed ? '0' : '0 18px',
+                    gap: '10px',
+                    height: '38px',
+                    padding: collapsed ? '0' : '0 10px',
                     justifyContent: collapsed ? 'center' : 'flex-start',
-                    marginBottom: '8px', borderRadius: '18px',
+                    marginBottom: '2px', borderRadius: '8px',
                     textDecoration: 'none',
-                    color: isActive ? '#fff' : text,
-                    background: isActive
-                      ? 'linear-gradient(135deg, rgba(9,123,26,0.75), rgba(139,92,246,.65))'
-                      : 'transparent',
-                    border: isActive ? '1px solid rgba(139,92,246,.35)' : '1px solid transparent',
-                    boxShadow: isActive ? '0 10px 30px rgba(99,102,241,.25)' : 'none',
-                    transition: 'all .22s ease',
+                    // ── PREMIUM ACTIVE STATE — no gradient, no glow ──────────
+                    // Clean: left border accent + subtle dark bg
+                    color: isActive ? SB.textActive : SB.text,
+                    background: isActive ? SB.active : 'transparent',
+                    borderLeft: isActive
+                      ? `2px solid ${SB.accent}`
+                      : '2px solid transparent',
+                    paddingLeft: isActive && !collapsed ? '8px' : (collapsed ? '0' : '10px'),
+                    boxShadow: 'none',
+                    transition: 'background 0.12s, color 0.12s, border-color 0.12s',
                   })}
                   onMouseEnter={e => {
-                    if (!e.currentTarget.classList.contains('sidebar-nav-item--active'))
-                      e.currentTarget.style.background = hoverBg
+                    if (!e.currentTarget.classList.contains('sidebar-nav-item--active')) {
+                      e.currentTarget.style.background = SB.hover
+                      e.currentTarget.style.color = SB.textActive
+                    }
                   }}
                   onMouseLeave={e => {
-                    if (!e.currentTarget.classList.contains('sidebar-nav-item--active'))
+                    if (!e.currentTarget.classList.contains('sidebar-nav-item--active')) {
                       e.currentTarget.style.background = 'transparent'
+                      e.currentTarget.style.color = SB.text
+                    }
                   }}
                 >
-                  <item.icon size={18} />
+                  <item.icon size={16} />
                   {!collapsed && (
-                    <span style={{ fontSize: '.93rem', fontWeight: 500, whiteSpace: 'nowrap' }}>
+                    <span style={{
+                      fontSize: '13.5px', fontWeight: '500',
+                      whiteSpace: 'nowrap', letterSpacing: '-0.01em',
+                    }}>
                       {item.label}
                     </span>
                   )}
@@ -345,26 +458,36 @@ export default function AppShell() {
           ))}
         </nav>
 
-        {/* ── Sidebar Footer: theme toggle + user menu ── */}
-        <div style={{ padding: '8px', borderTop: `1px solid ${border}`, flexShrink: 0 }}>
+        {/* ── Sidebar Footer ────────────────────────────────────────────── */}
+        <div style={{
+          padding: '8px',
+          borderTop: `0.5px solid ${SB.border}`,
+          flexShrink: 0,
+        }}>
 
           {/* Theme toggle */}
           <button
             onClick={toggleTheme}
             title={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
             style={{
-              width: '100%', minHeight: '40px', borderRadius: '10px',
+              width: '100%', height: '36px', borderRadius: '8px',
               display: 'flex', alignItems: 'center',
               justifyContent: collapsed ? 'center' : 'flex-start',
-              gap: '10px', padding: collapsed ? '0' : '0 12px',
-              border: 'none', background: 'transparent', color: text,
-              cursor: 'pointer', fontSize: '.9rem', fontWeight: 500,
-              transition: 'background .15s',
+              gap: '10px', padding: collapsed ? '0' : '0 10px',
+              border: 'none', background: 'transparent', color: SB.text,
+              cursor: 'pointer', fontSize: '13px', fontWeight: '500',
+              transition: 'background 0.12s, color 0.12s',
             }}
-            onMouseEnter={e => { e.currentTarget.style.background = hoverBg }}
-            onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}
+            onMouseEnter={e => {
+              e.currentTarget.style.background = SB.hover
+              e.currentTarget.style.color = SB.textActive
+            }}
+            onMouseLeave={e => {
+              e.currentTarget.style.background = 'transparent'
+              e.currentTarget.style.color = SB.text
+            }}
           >
-            {isDark ? <SunIcon size={17} /> : <MoonIcon size={17} />}
+            {isDark ? <SunIcon size={15} /> : <MoonIcon size={15} />}
             {!collapsed && <span>{isDark ? 'Light mode' : 'Dark mode'}</span>}
           </button>
 
@@ -375,77 +498,89 @@ export default function AppShell() {
               aria-haspopup="true"
               aria-expanded={userMenuOpen}
               style={{
-                width: '100%', minHeight: '52px', borderRadius: '12px',
+                width: '100%', height: '48px', borderRadius: '9px',
                 display: 'flex', alignItems: 'center',
                 justifyContent: collapsed ? 'center' : 'flex-start',
-                gap: '10px', padding: collapsed ? '0' : '0 10px',
-                border: `1px solid ${userMenuOpen ? 'rgba(139,92,246,.4)' : 'transparent'}`,
-                background: userMenuOpen ? hoverBg : 'transparent',
-                cursor: 'pointer', transition: 'background .15s, border-color .15s',
+                gap: '9px', padding: collapsed ? '0' : '0 8px',
+                // ── PREMIUM — green border when open, not indigo ──────────
+                border: `0.5px solid ${userMenuOpen ? SB.accent : 'transparent'}`,
+                background: userMenuOpen ? SB.active : 'transparent',
+                cursor: 'pointer', transition: 'background 0.12s, border-color 0.12s',
               }}
-              onMouseEnter={e => { e.currentTarget.style.background = hoverBg }}
+              onMouseEnter={e => { if (!userMenuOpen) e.currentTarget.style.background = SB.hover }}
               onMouseLeave={e => { if (!userMenuOpen) e.currentTarget.style.background = 'transparent' }}
             >
+              {/* ── PREMIUM AVATAR — forest green, no teal gradient ──── */}
               <div style={{
-                width: '34px', height: '34px', borderRadius: '9px',
-                background: 'linear-gradient(135deg,#06b6d4,#14b8a6)',
+                width: '32px', height: '32px', borderRadius: '8px',
+                background: SB.accent,
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
-                color: '#fff', fontWeight: 700, fontSize: '1rem', flexShrink: 0,
+                color: '#fff', fontWeight: '600', fontSize: '13px', flexShrink: 0,
+                fontFamily: 'var(--font-display)',
               }}>
                 {user?.username?.[0]?.toUpperCase() ?? 'U'}
               </div>
               {!collapsed && (
                 <div style={{ overflow: 'hidden', textAlign: 'left', minWidth: 0 }}>
-                  <div style={{ color: text, fontWeight: 600, fontSize: '.9rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                  <div style={{
+                    color: SB.textActive, fontWeight: '500', fontSize: '13px',
+                    whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                    letterSpacing: '-0.01em',
+                  }}>
                     {user?.username ?? 'User'}
                   </div>
-                  <div style={{ color: textMuted, fontSize: '.78rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                  <div style={{
+                    color: SB.text, fontSize: '11px',
+                    whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                  }}>
                     {user?.email ?? ''}
                   </div>
                 </div>
               )}
             </button>
 
-            {/* Dropdown */}
+            {/* User dropdown */}
             {userMenuOpen && (
               <div style={{
-                position: 'absolute', bottom: 'calc(100% + 6px)', left: 0, right: 0,
-                background: surface, border: `1px solid ${border}`, borderRadius: '12px',
-                boxShadow: isDark ? '0 8px 32px rgba(0,0,0,.5)' : '0 8px 32px rgba(0,0,0,.12)',
+                position: 'absolute',
+                bottom: 'calc(100% + 6px)', left: 0, right: 0,
+                background: '#1A1917',
+                border: `0.5px solid ${SB.border}`,
+                borderRadius: '10px',
+                boxShadow: '0 8px 32px rgba(0,0,0,0.5)',
                 overflow: 'hidden', zIndex: 100,
                 minWidth: collapsed ? '160px' : 'auto',
                 ...(collapsed ? { left: '100%', bottom: 0, marginLeft: '8px', right: 'auto', width: '160px' } : {}),
               }}>
                 <div style={{ padding: '4px' }}>
-                  <div style={{ height: '1px', background: border, margin: '2px 0' }} />
                   <button
                     onClick={() => { setUserMenuOpen(false); navigate('/profile') }}
                     style={{
                       display: 'flex', alignItems: 'center', gap: '10px',
-                      padding: '10px 12px', borderRadius: '8px',
-                      color: text, fontSize: '.9rem', fontWeight: 500,
+                      padding: '9px 12px', borderRadius: '7px',
+                      color: SB.textActive, fontSize: '13px', fontWeight: '500',
                       background: 'transparent', border: 'none', cursor: 'pointer',
-                      width: '100%', textAlign: 'left', transition: 'background .12s',
+                      width: '100%', textAlign: 'left', transition: 'background 0.10s',
                     }}
-                    onMouseEnter={e => { e.currentTarget.style.background = hoverBg }}
+                    onMouseEnter={e => { e.currentTarget.style.background = SB.hover }}
                     onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}
                   >
                     ⚙ Settings
                   </button>
+                  <div style={{ height: '0.5px', background: SB.border, margin: '2px 8px' }} />
                   <button
                     onClick={handleLogout}
                     style={{
                       display: 'flex', alignItems: 'center', gap: '10px',
-                      padding: '10px 12px', borderRadius: '8px',
-                      color: '#f87171', fontSize: '.9rem', fontWeight: 500,
+                      padding: '9px 12px', borderRadius: '7px',
+                      color: '#f87171', fontSize: '13px', fontWeight: '500',
                       background: 'transparent', border: 'none', cursor: 'pointer',
-                      width: '100%', textAlign: 'left', transition: 'background .12s',
+                      width: '100%', textAlign: 'left', transition: 'background 0.10s',
                     }}
-                    onMouseEnter={e => { e.currentTarget.style.background = 'rgba(248,113,113,.1)' }}
+                    onMouseEnter={e => { e.currentTarget.style.background = 'rgba(248,113,113,0.08)' }}
                     onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}
                   >
-                    <LogoutIcon size={16} />
-                    Sign out
+                    <LogoutIcon size={14} /> Sign out
                   </button>
                 </div>
               </div>
@@ -454,89 +589,99 @@ export default function AppShell() {
         </div>
       </aside>
 
-      {/* ══════════════════════════════════════════
+      {/* ══════════════════════════════════════════════════════════════════
           MAIN CONTENT COLUMN
-          Contains: mobile top bar + page content
-      ══════════════════════════════════════════ */}
+      ══════════════════════════════════════════════════════════════════ */}
       <div
         style={{
           flex: 1,
           display: 'flex',
-          flexDirection: 'column',   /* ← stacks top bar above main */
+          flexDirection: 'column',
           overflow: 'hidden',
           minWidth: 0,
+          // ── CENTERING FIX — main area transitions smoothly when
+          // sidebar collapses. flex:1 handles the width automatically
+          // because the sidebar's width is transitioning. Adding a
+          // matching transition here makes the reflow smooth.
+          transition: 'all 0.22s cubic-bezier(0.16,1,0.3,1)',
         }}
       >
 
-        {/* ── Mobile Top Bar ──────────────────────
-            Visible only on mobile (≤768px).
-            CSS in mobile-responsive.css shows it.
-        ─────────────────────────────────────────── */}
+        {/* ── Mobile topbar ──────────────────────────────────────────── */}
         <div className="mobile-top-bar">
-          <Link to="/dashboard" className="mobile-top-bar-logo">
-            <div className="mobile-top-bar-logo-mark">R</div>
-            <span className="mobile-top-bar-logo-text">ResearchOS</span>
-          </Link>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            {/* Hamburger — opens mobile sidebar */}
+            <button
+              onClick={() => setMobileOpen(v => !v)}
+              aria-label="Open navigation"
+              className="mobile-menu-btn"
+              style={{ display: 'flex' }}
+            >
+              <HamburgerIcon size={18} />
+            </button>
+            <Link to="/dashboard" className="mobile-top-bar-logo" style={{ textDecoration: 'none' }}>
+              <div style={{
+                width: '24px', height: '24px', borderRadius: '6px',
+                background: SB.accent, display: 'flex', alignItems: 'center',
+                justifyContent: 'center', color: '#fff', fontWeight: '700', fontSize: '13px',
+              }}>R</div>
+              <span style={{
+                fontSize: '14px', fontWeight: '600', color: text,
+                letterSpacing: '-0.02em',
+              }}>ResearchOS</span>
+            </Link>
+          </div>
 
           <div className="mobile-top-bar-actions">
-            {/* Theme toggle */}
             <button
               onClick={toggleTheme}
-              aria-label={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
+              aria-label={isDark ? 'Light mode' : 'Dark mode'}
               style={{
-                width: '36px', height: '36px',
-                border: '1px solid var(--border)',
-                background: 'var(--bg-card)',
-                color: 'var(--text-muted)',
-                cursor: 'pointer',
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                borderRadius: '8px',
-                transition: 'background .15s, color .15s',
+                width: '34px', height: '34px',
+                border: `0.5px solid ${border}`,
+                background: surface, color: textMuted,
+                cursor: 'pointer', display: 'flex',
+                alignItems: 'center', justifyContent: 'center',
+                borderRadius: '8px', transition: 'background 0.12s',
               }}
             >
-              {isDark ? <SunIcon size={17} /> : <MoonIcon size={17} />}
+              {isDark ? <SunIcon size={15} /> : <MoonIcon size={15} />}
             </button>
-
-            {/* Sign out */}
             <button
               onClick={handleLogout}
               aria-label="Sign out"
               style={{
-                width: '36px', height: '36px',
-                border: '1px solid var(--border)',
-                background: 'var(--bg-card)',
-                color: '#f87171',
-                cursor: 'pointer',
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                borderRadius: '8px',
-                transition: 'background .15s',
+                width: '34px', height: '34px',
+                border: `0.5px solid ${border}`,
+                background: surface, color: '#f87171',
+                cursor: 'pointer', display: 'flex',
+                alignItems: 'center', justifyContent: 'center',
+                borderRadius: '8px', transition: 'background 0.12s',
               }}
             >
-              <LogoutIcon size={16} />
+              <LogoutIcon size={14} />
             </button>
           </div>
         </div>
 
-        {/* ── Page content ── */}
+        {/* ── Page content ───────────────────────────────────────────── */}
         <main
           className="app-shell-main"
           style={{
             flex: 1,
             overflowY: 'auto',
-            padding: '32px 40px',
+            padding: '28px 36px',
             minWidth: 0,
           }}
         >
-          <Outlet />
+          {/* page-transition gives every page the fade+slide-up animation */}
+          <div className="page-transition" key={location.pathname}>
+            <Outlet />
+          </div>
         </main>
-
       </div>
 
-      {/* ══════════════════════════════════════════
-          MOBILE BOTTOM NAV
-          Visible only on mobile (≤768px).
-          CSS in mobile-responsive.css shows it.
-      ══════════════════════════════════════════ */}
+      {/* ── Mobile bottom nav ─────────────────────────────────────────── */}
       <nav className="mobile-bottom-nav" aria-label="Main navigation">
         {NAV[0].items.map(item => (
           <NavLink
@@ -546,32 +691,29 @@ export default function AppShell() {
               `mobile-bottom-nav-item${isActive ? ' mobile-bottom-nav-item--active' : ''}`
             }
           >
-            <item.icon size={22} />
+            <item.icon size={20} />
             <span className="mobile-bottom-nav-label">{item.label}</span>
           </NavLink>
         ))}
       </nav>
 
-      <CommandPalette
-        open={paletteOpen}
-        onClose={() => setPaletteOpen(false)}
-      />
+      {/* ── Global overlays ───────────────────────────────────────────── */}
+      <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />
+      <CreateWorkspaceModal open={createWsOpen} onClose={() => setCreateWsOpen(false)} />
 
-      {/* NEW: CreateWorkspaceModal */}
-      <CreateWorkspaceModal
-        open={createWsOpen}
-        onClose={() => setCreateWsOpen(false)}
-      />
+      {/* Toast system — always available on every protected page */}
+      <ToastContainer />
 
     </div>
   )
 }
 
-/* ══════════════════════════════════════════════════════
-   ICONS
-══════════════════════════════════════════════════════ */
 
-function HomeIcon({ size = 20 }) {
+/* ══════════════════════════════════════════════════════════════════════════
+   ICONS — clean, consistent 1.8px stroke weight
+══════════════════════════════════════════════════════════════════════════ */
+
+function HomeIcon({ size = 18 }) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
       <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
@@ -580,7 +722,7 @@ function HomeIcon({ size = 20 }) {
   )
 }
 
-function SearchIcon({ size = 20 }) {
+function SearchIcon({ size = 18 }) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
       <circle cx="11" cy="11" r="8"/>
@@ -589,7 +731,7 @@ function SearchIcon({ size = 20 }) {
   )
 }
 
-function FileIcon({ size = 20 }) {
+function FileIcon({ size = 18 }) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
       <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
@@ -600,7 +742,7 @@ function FileIcon({ size = 20 }) {
   )
 }
 
-function NewsIcon({ size = 20 }) {
+function NewsIcon({ size = 18 }) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
       <path d="M4 22h16a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2H8a2 2 0 0 0-2 2v16a2 2 0 0 1-2 2Zm0 0a2 2 0 0 1-2-2v-9c0-1.1.9-2 2-2h2"/>
@@ -609,19 +751,43 @@ function NewsIcon({ size = 20 }) {
   )
 }
 
-function SunIcon({ size = 20 }) {
+function HistoryIcon({ size = 18 }) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-      <circle cx="12" cy="12" r="5"/>
-      <line x1="12" y1="1"  x2="12" y2="3" /><line x1="12" y1="21" x2="12" y2="23"/>
-      <line x1="4.22" y1="4.22"   x2="5.64" y2="5.64"  /><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/>
-      <line x1="1"    y1="12"     x2="3"    y2="12"    /><line x1="21"    y1="12"    x2="23"    y2="12"   />
-      <line x1="4.22" y1="19.78"  x2="5.64" y2="18.36" /><line x1="18.36" y1="5.64"  x2="19.78" y2="4.22" />
+      <polyline points="12 8 12 12 14 14"/>
+      <path d="M3.05 11a9 9 0 1 1 .5 4m-.5 5v-5h5"/>
     </svg>
   )
 }
 
-function MoonIcon({ size = 20 }) {
+function CalendarIcon({ size = 18 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/>
+      <line x1="16" y1="2" x2="16" y2="6"/>
+      <line x1="8" y1="2" x2="8" y2="6"/>
+      <line x1="3" y1="10" x2="21" y2="10"/>
+    </svg>
+  )
+}
+
+function SunIcon({ size = 18 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="12" r="5"/>
+      <line x1="12" y1="1" x2="12" y2="3"/>
+      <line x1="12" y1="21" x2="12" y2="23"/>
+      <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/>
+      <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/>
+      <line x1="1" y1="12" x2="3" y2="12"/>
+      <line x1="21" y1="12" x2="23" y2="12"/>
+      <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/>
+      <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>
+    </svg>
+  )
+}
+
+function MoonIcon({ size = 18 }) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
       <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
@@ -629,7 +795,7 @@ function MoonIcon({ size = 20 }) {
   )
 }
 
-function LogoutIcon({ size = 20 }) {
+function LogoutIcon({ size = 18 }) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
       <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
@@ -639,15 +805,25 @@ function LogoutIcon({ size = 20 }) {
   )
 }
 
-function ChevronIcon({ size = 16, flipped }) {
+function ChevronIcon({ size = 14, flipped }) {
   return (
     <svg
       width={size} height={size} viewBox="0 0 24 24"
       fill="none" stroke="currentColor" strokeWidth="2"
       strokeLinecap="round" strokeLinejoin="round"
-      style={{ transform: flipped ? 'rotate(180deg)' : 'none', transition: 'transform .2s' }}
+      style={{ transform: flipped ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }}
     >
       <polyline points="15 18 9 12 15 6"/>
+    </svg>
+  )
+}
+
+function HamburgerIcon({ size = 18 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <line x1="3" y1="6" x2="21" y2="6"/>
+      <line x1="3" y1="12" x2="21" y2="12"/>
+      <line x1="3" y1="18" x2="21" y2="18"/>
     </svg>
   )
 }

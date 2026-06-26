@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import React, { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../../context/AuthContext'
 
@@ -26,7 +26,7 @@ const FEATURE_CONFIG = {
   },
 }
 
-export function MiniHistoryStrip({ feature }) {
+export const MiniHistoryStrip = React.memo(function MiniHistoryStrip({ feature }) {
   const [items,    setItems]    = useState([])
   const [open,     setOpen]     = useState(false)
   const [loading,  setLoading]  = useState(false)
@@ -108,4 +108,4 @@ export function MiniHistoryStrip({ feature }) {
       )}
     </div>
   )
-}
+})

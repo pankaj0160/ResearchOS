@@ -22,6 +22,8 @@ from database import (
     get_user_full_async, update_user_profile_async,
 )
 
+from error_models import STANDARD_ERROR_RESPONSES, ErrorResponse
+
 # ── Create the router ─────────────────────────────────────────────────────────
 # Think of this like creating a mini-app.
 # prefix="/api/auth" means every route here automatically starts with /api/auth
@@ -68,7 +70,11 @@ class ResetPasswordRequest(BaseModel):
 
 # ── POST /api/auth/register ───────────────────────────────────────────────────
 
-@router.post("/register", status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/register",
+    status_code=status.HTTP_201_CREATED,
+    responses=STANDARD_ERROR_RESPONSES,
+)
 async def register(req: RegisterRequest):
     # Check if email already exists in the database
     if await get_user_by_email_async(req.email):
@@ -106,7 +112,10 @@ async def register(req: RegisterRequest):
 
 # ── POST /api/auth/login ──────────────────────────────────────────────────────
 
-@router.post("/login")
+@router.post(
+    "/login",
+    responses=STANDARD_ERROR_RESPONSES,
+)
 async def login(req: LoginRequest):
     # Look up the user by email
     user = await get_user_by_email_async(req.email)
@@ -178,7 +187,10 @@ async def reset_password(req: ResetPasswordRequest):
 # Protected route — requires a valid JWT token.
 # current_user is automatically populated by get_current_user() dependency.
 
-@router.get("/me")
+@router.get(
+    "/me",
+    responses=STANDARD_ERROR_RESPONSES,
+)
 async def me(current_user: CurrentUser):
     # get_user_full() returns everything including city and default_topic
     # (used by the Dashboard to show local weather and relevant headlines)
@@ -200,7 +212,10 @@ async def me(current_user: CurrentUser):
 # ── PATCH /api/auth/me ────────────────────────────────────────────────────────
 # Lets users update their city (for weather) and default_topic (for headlines)
 
-@router.patch("/me")
+@router.patch(
+    "/me",
+    responses=STANDARD_ERROR_RESPONSES,
+)
 async def update_me(body: dict, current_user: CurrentUser):
     city          = body.get("city")
     default_topic = body.get("default_topic")

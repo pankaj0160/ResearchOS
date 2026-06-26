@@ -1,11 +1,8 @@
 import { createContext, useCallback, useContext, useEffect, useState } from 'react'
+import { apiClient } from '../services/apiClient.js'
+import { getToken, setToken, clearToken } from '../services/tokenStorage.js'
 
 const AuthContext = createContext(null)
-
-const TOKEN_KEY = 'researchos_token'
-
-import { API_BASE_URL } from '../services/config.js'
-const BASE_URL = API_BASE_URL
 
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null)
@@ -13,51 +10,41 @@ export function AuthProvider({ children }) {
 
   // On mount, try to rehydrate session from localStorage
   useEffect(() => {
-    const token = localStorage.getItem(TOKEN_KEY)
+    const token = getToken()
     if (!token) {
       setLoading(false)
       return
     }
 
-    fetch(`${BASE_URL}/api/auth/me`, {
-      headers: { Authorization: `Bearer ${token}` },
-    })
-      .then(r => (r.ok ? r.json() : Promise.reject()))
-      .then(data => setUser(data))
-      .catch(() => localStorage.removeItem(TOKEN_KEY))
+    apiClient.get('/api/auth/me', { silent: true })
+      .then(result => {
+        if (result.ok) {
+          setUser(result.data)
+        } else {
+          clearToken()
+        }
+      })
       .finally(() => setLoading(false))
   }, [])
 
   const login = useCallback((token, userData) => {
-    localStorage.setItem(TOKEN_KEY, token)
+    setToken(token)
     setUser(userData)
   }, [])
 
   const logout = useCallback(() => {
-    localStorage.removeItem(TOKEN_KEY)
+    clearToken()
     setUser(null)
   }, [])
 
   /** Update city and/or default_topic */
   const updateProfile = useCallback(async (updates) => {
-    const token = localStorage.getItem(TOKEN_KEY)
-    if (!token) return
-
-    await fetch(`${BASE_URL}/api/auth/me`, {
-      method: 'PATCH',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify(updates),
-    })
-
-    // Update local state immediately
-    setUser(prev => (prev ? { ...prev, ...updates } : prev))
+    const result = await apiClient.patch('/api/auth/me', { body: updates })
+    if (result.ok) {
+      setUser(prev => (prev ? { ...prev, ...updates } : prev))
+    }
+    return result
   }, [])
-
-  /** Return the stored JWT (used by API calls) */
-  const getToken = useCallback(() => localStorage.getItem(TOKEN_KEY), [])
 
   return (
     <AuthContext.Provider

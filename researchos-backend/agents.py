@@ -104,7 +104,7 @@ def _run_tool_loop(
     user_message: str,
     max_iterations: int = MAX_TOOL_ITERATIONS,
 ) -> str:
-    from groq import RateLimitError, BadRequestError
+    from groq import RateLimitError, BadRequestError, InternalServerError
 
     current_model = llm.model_name
     models_to_try = [current_model] + [m for m in TOOL_USE_MODELS if m != current_model]
@@ -119,6 +119,10 @@ def _run_tool_loop(
             return _run_tool_loop_inner(current_llm, tools, user_message, max_iterations)
         except RateLimitError as exc:
             print(f"[Groq] 429 — model={model} key={key[:12]}… exhausted, trying next combo")
+            last_err = exc
+            continue
+        except InternalServerError as exc:
+            print(f"[Groq] 503 — model={model} over capacity, trying next combo")
             last_err = exc
             continue
         except BadRequestError as exc:

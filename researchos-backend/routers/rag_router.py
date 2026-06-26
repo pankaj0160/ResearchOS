@@ -36,6 +36,7 @@ import database
 from auth import get_current_user
 from rag import chat_with_pdf, get_top_sources, ingest_pdf, ingest_text_content
 from rate_limit import upload_limiter
+from error_models import STANDARD_ERROR_RESPONSES, ErrorResponse
 
 # ── Router ────────────────────────────────────────────────────────────────────
 router = APIRouter(prefix="/api/rag", tags=["RAG"])
@@ -177,7 +178,10 @@ async def _ingest_text_background(
 
 # ── POST /api/rag/upload ──────────────────────────────────────────────────────
 
-@router.post("/upload")
+@router.post(
+    "/upload",
+    responses=STANDARD_ERROR_RESPONSES,
+)
 async def rag_upload(
     background_tasks: BackgroundTasks,
     current_user:     CurrentUser,
@@ -305,7 +309,10 @@ async def rag_sessions(current_user: CurrentUser):
 
 # ── POST /api/rag/chat ────────────────────────────────────────────────────────
 
-@router.post("/chat")
+@router.post(
+    "/chat",
+    responses=STANDARD_ERROR_RESPONSES,
+)
 async def rag_chat(body: RagChatRequest, current_user: CurrentUser):
     """
     Stream an answer grounded in the uploaded PDF.
@@ -466,7 +473,6 @@ async def rag_ingest_text(
         "status":     "processing",
         "created_at": created_at,
     }
-
 
 
 # ── Session cleanup — fixes the memory leak ───────────────────────────────────
