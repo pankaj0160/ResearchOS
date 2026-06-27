@@ -34,7 +34,7 @@ from pydantic import BaseModel
 
 import database
 from auth import get_current_user
-from rag import chat_with_pdf, get_top_sources, ingest_pdf, ingest_text_content
+from rag import chat_with_pdf, get_top_sources, ingest_pdf, ingest_text_content, get_progress
 from rate_limit import upload_limiter
 from error_models import STANDARD_ERROR_RESPONSES, ErrorResponse
 
@@ -256,6 +256,33 @@ async def rag_upload(
         "filename":   file.filename,
         "status":     "processing",
         "created_at": created_at,
+    }
+
+
+# ── GET /api/rag/progress/{session_id} ───────────────────────────────────────
+
+@router.get("/progress/{session_id}")
+async def rag_progress(session_id: str, current_user: CurrentUser):
+    """
+    Returns fine-grained processing progress for a PDF upload.
+    Poll this every second while status='processing' to show a progress bar.
+
+    Returns:
+      { pct: 0-100, stage: "Embedding chunk 5/120...", done: bool, error: str|None }
+    """
+    session = _rag_sessions.get(session_id)
+    if not session:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Session not found.")
+    if session["user_id"] != current_user["id"]:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Access denied.")
+
+    progress = get_progress(session_id)
+    return {
+        "session_id": session_id,
+        "pct":        progress.get("pct",   0),
+        "stage":      progress.get("stage", "waiting"),
+        "done":       progress.get("done",  False),
+        "error":      progress.get("error"),
     }
 
 

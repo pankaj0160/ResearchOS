@@ -44,13 +44,15 @@ export function usePDFChat() {
 
       // Step 2: poll until ingestion is done
       setUploadProgress(10)
-      const ready = await ragApi.getStatus(meta.data.session_id, pct => setUploadProgress(pct))
+      const ready = await ragApi.getStatus(meta.data.session_id)
 
-      // Step 3: session is ready — set it with full metadata
-      setUploadProgress(100)
-      setSession(ready)
+      if (!ready.ok) {
+        throw new Error(ready.error)
+      }
+
+      setSession(ready.data)
       setMessages([])
-      return ready
+      return ready.data
 
     } catch (err) {
       setUploadError(err.message)
@@ -63,8 +65,11 @@ export function usePDFChat() {
   // ── Load existing sessions ────────────────────────────────────────────────
   const loadSessions = useCallback(async () => {
     try {
-      const data = await ragApi.getSessions()
-      setSessions(data.sessions ?? [])
+      const result = await ragApi.getSessions()
+
+      if (!result.ok) return
+
+      setSessions(result.data.sessions ?? [])
     } catch { /* silent */ }
   }, [])
 
@@ -73,8 +78,19 @@ export function usePDFChat() {
     setSession(sess)
     setChatError('')
     try {
-      const data = await ragApi.getHistory(sess.session_id)
-      const msgs = (data.messages ?? []).map(m => ({ id: nextId(), role: m.role, content: m.content }))
+      const result = await ragApi.getHistory(sess.session_id)
+
+      if (!result.ok) {
+         setMessages([])
+         return
+      }
+
+      const msgs = (result.data.messages ?? []).map(m => ({
+        id: nextId(),
+        role: m.role,
+        content: m.content,
+      }))
+
       setMessages(msgs)
     } catch {
       setMessages([])
@@ -84,7 +100,11 @@ export function usePDFChat() {
   // ── Delete a session ─────────────────────────────────────────────────────
   const deleteSession = useCallback(async (sessionId) => {
     try {
-      await ragApi.deleteSession(sessionId)
+      const result = await ragApi.deleteSession(sessionId)
+
+      if (!result.ok) {
+        throw new Error(result.error)
+      }
       setSessions(prev => prev.filter(s => s.session_id !== sessionId))
       if (session?.session_id === sessionId) {
         setSession(null)

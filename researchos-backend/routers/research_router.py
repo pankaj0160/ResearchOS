@@ -124,6 +124,20 @@ async def research_stream(
     research_limiter.check(current_user["id"])
     user_id = current_user["id"]
 
+    # Deduplication — prevent same user running same topic twice at once
+    # Lazy import avoids circular import (main imports research_router)
+    try:
+        from main import is_research_in_flight, mark_research_started, mark_research_done
+        if is_research_in_flight(user_id, topic):
+            from fastapi import HTTPException
+            raise HTTPException(
+                409,
+                f"Research on '{topic}' is already in progress. Please wait for it to finish."
+            )
+        mark_research_started(user_id, topic)
+    except ImportError:
+        mark_research_started = mark_research_done = lambda *a: None
+
     async def event_stream():
         report    = ""                  # accumulates the writer agent's output
         feedback  = ""                  # accumulates the critic agent's output
@@ -231,6 +245,12 @@ async def research_stream(
             # Free memory held by potentially large report strings
             del report, feedback
             gc.collect()
+            # Always clear dedup key — even if pipeline crashed
+            try:
+                from main import mark_research_done
+                mark_research_done(user_id, topic)
+            except ImportError:
+                pass
 
     # Wrap the generator in a StreamingResponse with SSE headers
     return StreamingResponse(

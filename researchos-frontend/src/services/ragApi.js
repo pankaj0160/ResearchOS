@@ -74,7 +74,7 @@ export const ragApi = {
    * @param {function} onError   - called if the stream errors
    */
   streamChat: async (sessionId, question, { onChunk, onSources, onDone, onError }) => {
-    const token = localStorage.getItem('token') || ''
+    const token = localStorage.getItem('researchos_token') || ''
 
     let response
     try {

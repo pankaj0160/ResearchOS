@@ -24,6 +24,7 @@ import database
 import dashboard_agent as _dash
 import news as _news_module
 from auth import get_current_user
+from rate_limit import news_limiter, dashboard_limiter
 from database import (
     cache_get, cache_set,
     get_tracked_topics_async,
@@ -115,6 +116,8 @@ async def news_summarize(
     days:         int = Query(default=7, ge=1, le=30),
     current_user: CurrentUser = None,
 ):
+    # Rate limit: 10 news summaries per 60 seconds per user
+    news_limiter.check(current_user["id"])
     cat = category.lower().strip()
     if cat not in _news_module.VALID_CATEGORIES:
         raise HTTPException(400, f"Invalid category '{cat}'.")
@@ -316,6 +319,9 @@ async def dashboard_chat(body: dict, current_user: CurrentUser = None):
     AI assistant chat for the Dashboard — streams response token by token.
     Uses run_in_executor so the blocking LLM call never freezes the server.
     """
+    # Rate limit: 20 dashboard chats per 60 seconds per user
+    if current_user:
+        dashboard_limiter.check(current_user["id"])
     query = body.get("query", "").strip()
     if not query:
         raise HTTPException(422, "query cannot be empty")
