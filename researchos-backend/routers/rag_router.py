@@ -415,7 +415,7 @@ async def rag_delete_session(session_id: str, current_user: CurrentUser):
 
     # Remove from database
     try:
-        database.delete_rag_session(session_id)
+        database.delete_rag_session_db(session_id)
     except Exception:
         pass    # DB deletion is best-effort too
 
