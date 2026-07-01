@@ -33,11 +33,22 @@ from database import (
     get_rag_sessions_for_user,
 )
 
-# Import the live in-memory session store from rag_router
-from routers.rag_router import _rag_sessions
+# _rag_sessions is imported lazily inside route handlers to avoid
+# circular import (workspace_router now registers before rag_router)
 
 # ── Router setup ──────────────────────────────────────────────────────────────
 router = APIRouter(tags=["Workspaces"])
+
+def _get_rag_sessions() -> dict:
+    """
+    Lazy import of _rag_sessions from rag_router.
+    Avoids circular import: workspace_router is registered before rag_router
+    in main.py (to fix route ordering), so we can't import at module level.
+    Lazy import inside functions works because by the time any request arrives,
+    all modules are fully loaded.
+    """
+    from routers.rag_router import _rag_sessions
+    return _rag_sessions
 
 # This type shortcut reads the JWT token and returns the logged-in user dict
 CurrentUser = Annotated[dict, Depends(get_current_user)]
@@ -203,7 +214,7 @@ async def unified_history(
     # RAG sessions — merge in-memory + DB (so restarts don't wipe history)
     db_rag = get_rag_sessions_for_user(uid)
     combined_rag: dict[str, dict] = {s["id"]: s for s in db_rag}
-    for sid, s in _rag_sessions.items():
+    for sid, s in _get_rag_sessions().items():
         if s.get("user_id") == uid:
             combined_rag[sid] = {**s, "id": sid}
 
@@ -287,7 +298,7 @@ async def recent_per_feature(current_user: CurrentUser):
                 "created_at": s.get("created_at"),
                 "page_count": s.get("page_count", 0),
             }
-            for sid, s in _rag_sessions.items()
+            for sid, s in _get_rag_sessions().items()
             if s.get("user_id") == uid and s.get("status") == "ready"
         ],
         key=lambda x: x.get("created_at") or 0,
@@ -366,7 +377,7 @@ async def global_search(
             "subtitle": f"PDF · {s.get('page_count', 0)} pages",
             "url":      f"/pdf-chat?session={sid}",
         }
-        for sid, s in _rag_sessions.items()
+        for sid, s in _get_rag_sessions().items()
         if s.get("user_id") == uid
         and s.get("status") == "ready"
         and kw in (s.get("filename") or "").lower()

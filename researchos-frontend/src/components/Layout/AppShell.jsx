@@ -45,6 +45,12 @@ const NAV = [
     ],
   },
   {
+    section: 'Workspace',
+    items: [
+      { to: '/workspace', icon: FolderIcon, label: 'Workspaces' },
+    ],
+  },
+  {
     section: 'History',
     items: [
       { to: '/history',   icon: HistoryIcon,  label: 'History'  },
@@ -77,6 +83,26 @@ export default function AppShell() {
 
   const [collapsed,     setCollapsed]     = useState(false)
   const [mobileOpen,    setMobileOpen]    = useState(false)  // mobile drawer
+
+  // ── Reactive mobile detection ─────────────────────────────────────────────
+  // WHY: window.innerWidth read at render time is a one-time snapshot.
+  // When the component mounts on a 400px screen, the snapshot is taken ONCE
+  // during the first render. After that, nothing updates it — so mobileOpen
+  // toggles but the sidebar never gets `position:fixed` styles because the
+  // JS condition never re-evaluates. We use a ResizeObserver to keep
+  // isMobile in sync with the actual viewport width at all times.
+  const [isMobile, setIsMobile] = useState(() => {
+    if (typeof window === 'undefined') return false
+    return window.innerWidth <= 768
+  })
+
+  useEffect(() => {
+    const handler = () => setIsMobile(window.innerWidth <= 768)
+    window.addEventListener('resize', handler)
+    // Run once immediately to sync state with current viewport
+    handler()
+    return () => window.removeEventListener('resize', handler)
+  }, [])
   const [userMenuOpen,  setUserMenuOpen]  = useState(false)
   const [paletteOpen,   setPaletteOpen]   = useState(false)
   const [createWsOpen,  setCreateWsOpen]  = useState(false)
@@ -94,8 +120,11 @@ export default function AppShell() {
     debounceRef.current = setTimeout(async () => {
       setHistLoading(true)
       try {
-        const data = await searchApi.history(histQuery)
-        setHistResults(data.results ?? [])
+        const res = await searchApi.history(histQuery)
+        // apiClient returns { ok, data: { results: {...} }, status }
+        const results = res?.data?.results ?? {}
+        // Flatten all result groups into one list for sidebar display
+        setHistResults(Object.values(results).flat())
       } catch (e) { console.error(e) }
       setHistLoading(false)
     }, 300)
@@ -185,8 +214,12 @@ export default function AppShell() {
           position: 'relative',
           zIndex: 50,
           // Mobile: position fixed, slide in from left
-          ...(typeof window !== 'undefined' && window.innerWidth <= 768 ? {
+          // Uses reactive isMobile state — updates on resize, not a snapshot
+          ...(isMobile ? {
             position: 'fixed',
+            top: 0,
+            left: 0,
+            bottom: 0,
             transform: mobileOpen ? 'translateX(0)' : 'translateX(-100%)',
             width: '260px',
             minWidth: '260px',
@@ -249,9 +282,9 @@ export default function AppShell() {
             )}
           </Link>
 
-          {/* Collapse toggle button */}
+          {/* Collapse toggle button — on mobile, closes drawer instead of collapsing */}
           <button
-            onClick={() => setCollapsed(v => !v)}
+            onClick={() => isMobile ? setMobileOpen(false) : setCollapsed(v => !v)}
             aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
             style={{
               width: '28px', height: '28px', display: 'flex',
@@ -675,7 +708,7 @@ export default function AppShell() {
           }}
         >
           {/* page-transition gives every page the fade+slide-up animation */}
-          <div className="page-transition" key={location.pathname}>
+          <div className="page-transition" key={location.pathname} style={{ animation: "page-fade-in 0.18s cubic-bezier(0.16,1,0.3,1) both" }}>
             <Outlet />
           </div>
         </main>
@@ -814,6 +847,14 @@ function ChevronIcon({ size = 14, flipped }) {
       style={{ transform: flipped ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }}
     >
       <polyline points="15 18 9 12 15 6"/>
+    </svg>
+  )
+}
+
+function FolderIcon({ size = 18 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
     </svg>
   )
 }

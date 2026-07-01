@@ -9,7 +9,7 @@ import { PDFUploadZone } from './PDFUploadZone'
 
 export function SessionSidebar({
   session, sessions,
-  uploading, uploadProgress, uploadError,
+  uploading, uploadProgress, uploadStage, uploadError,
   onFile, onSwitch, onDelete, onNewUpload,
 }) {
   return (
@@ -48,6 +48,7 @@ export function SessionSidebar({
           onFile={onFile}
           uploading={uploading}
           progress={uploadProgress}
+          stage={uploadStage}
           error={uploadError}
         />
       )}

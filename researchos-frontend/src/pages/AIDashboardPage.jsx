@@ -1,326 +1,291 @@
- import DashboardSkeleton from '../components/skeletons/DashboardSkeleton'
- import { useDashboard } from '../hooks/useDashboard'
+/**
+ * AIDashboardPage.jsx - Production dashboard
+ * Location: src/pages/AIDashboardPage.jsx
+ */
 
-import { WeatherCard } from '../components/Dashboard/WeatherCard'
+import { useState, useEffect, useCallback } from 'react'
+import { useNavigate } from 'react-router-dom'
+import { useAuth } from '../context/AuthContext'
+import { apiClient } from '../services/apiClient'
+import { useDashboard } from '../hooks/useDashboard'
+import { WeatherCard }     from '../components/Dashboard/WeatherCard'
+import { HeadlinesFeed }   from '../components/Dashboard/HeadlinesFeed'
+import { DashboardChat }   from '../components/Dashboard/DashboardChat'
 import { TravelSafetyCard } from '../components/Dashboard/TravelSafetyCard'
-import { HeadlinesFeed } from '../components/Dashboard/HeadlinesFeed'
-import { DashboardChat } from '../components/Dashboard/DashboardChat'
-import { ActivityFeed } from '../components/Dashboard/ActivityFeed'
+import DashboardSkeleton   from '../components/skeletons/DashboardSkeleton'
 
+// ── Helpers ───────────────────────────────────────────────────────────────────
+function getGreeting() {
+  const h = new Date().getHours()
+  if (h < 5)  return { text: 'Late Night',      emoji: '✨', sub: 'Building while the world sleeps.' }
+  if (h < 8)  return { text: 'Early Start',     emoji: '🌅', sub: 'A perfect time to get ahead.' }
+  if (h < 12) return { text: 'Good Morning',    emoji: '☀️', sub: 'Fresh insights and opportunities await.' }
+  if (h < 14) return { text: 'Good Afternoon',  emoji: '🌤️', sub: 'Take a moment to review what matters most.' }
+  if (h < 17) return { text: 'Good Afternoon',  emoji: '🚀', sub: 'Stay focused — consistency compounds.' }
+  if (h < 20) return { text: 'Good Evening',    emoji: '🌇', sub: 'Catch up on the latest updates.' }
+  return        { text: 'Good Evening',          emoji: '🌙', sub: 'Some of the best ideas come after sunset.' }
+}
 
-export default function AIDashboardPage() {
-  const {
-    weather,
-    weatherLoading,
-    weatherError,
-    weatherInput,
-    setWeatherInput,
-    fetchWeather,
+function formatRelative(ts) {
+  if (!ts) return ''
+  const d    = new Date(typeof ts === 'number' ? ts * 1000 : ts)
+  const diff = (Date.now() - d) / 1000
+  if (diff < 60)    return 'just now'
+  if (diff < 3600)  return `${Math.floor(diff / 60)}m ago`
+  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`
+  return `${Math.floor(diff / 86400)}d ago`
+}
 
-    safety,
-    safetyLoading,
-    safetyError,
-    safetyInput,
-    setSafetyInput,
-    fetchSafety,
+const EVENT_META = {
+  research_run:      { icon: '🔬', color: 'var(--accent)',  label: 'Research' },
+  research_complete: { icon: '✅', color: '#16a34a',        label: 'Research done' },
+  pdf_upload:        { icon: '📄', color: '#8B5CF6',        label: 'PDF uploaded' },
+  news_search:       { icon: '📰', color: '#F59E0B',        label: 'News' },
+  news_summarize:    { icon: '📊', color: '#F59E0B',        label: 'Summarized' },
+  workspace_created: { icon: '📁', color: 'var(--accent)',  label: 'Workspace' },
+}
 
-    headlines,
-    headlinesLoading,
-    headlinesError,
-    headlinesTopic,
-    setHeadlinesTopic,
-    fetchHeadlines,
+// ── Quick stat card ───────────────────────────────────────────────────────────
+function StatCard({ icon, label, value, sub, color, onClick }) {
+  return (
+    <div
+      onClick={onClick}
+      style={{
+        background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 12,
+        padding: '1rem', cursor: onClick ? 'pointer' : 'default',
+        transition: 'border-color .15s, box-shadow .15s',
+        display: 'flex', flexDirection: 'column', gap: 4,
+      }}
+      onMouseEnter={e => { if (onClick) { e.currentTarget.style.borderColor = 'var(--border-strong)'; e.currentTarget.style.boxShadow = 'var(--shadow)' } }}
+      onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.boxShadow = 'none' }}
+    >
+      <div style={{ fontSize: '1.25rem', lineHeight: 1 }}>{icon}</div>
+      <div style={{ fontFamily: 'var(--font-display)', fontSize: '1.5rem', fontWeight: 800, color: color || 'var(--text-primary)', letterSpacing: '-0.03em', lineHeight: 1 }}>
+        {value}
+      </div>
+      <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)' }}>{label}</div>
+      {sub && <div style={{ fontSize: 11, color: 'var(--text-faint)' }}>{sub}</div>}
+    </div>
+  )
+}
 
-    chatMessages,
-    chatInput,
-    setChatInput,
-    chatLoading,
-    chatError,
-    sendChat,
-  } = useDashboard()
+// ── Activity feed ─────────────────────────────────────────────────────────────
+function ActivityFeedCard({ events, loading }) {
+  const navigate = useNavigate()
 
-  // Show the full dashboard skeleton only on the first page load.
-  const initialLoading =
-    weatherLoading &&
-    safetyLoading &&
-    headlinesLoading &&
-    chatMessages.length === 0
-
-  if (initialLoading) {
-    return <DashboardSkeleton />
+  const navForEvent = (event) => {
+    const payload = typeof event.payload === 'string' ? JSON.parse(event.payload || '{}') : (event.payload || {})
+    if (event.event_type?.includes('research') && payload.topic) return () => navigate(`/research?topic=${encodeURIComponent(payload.topic)}`)
+    if (event.event_type?.includes('pdf')) return () => navigate('/pdf-chat')
+    if (event.event_type?.includes('news') && payload.topic) return () => navigate(`/news?topic=${encodeURIComponent(payload.topic)}`)
+    return null
   }
-
-  const now = new Date()
-  const hour = now.getHours()
-
-  let greeting = ''
-  let subtitle = ''
-  let emoji = ''
-
-  if (hour >= 5 && hour < 8) {
-    greeting = 'Early Start'
-    subtitle = 'The world is just waking up. A perfect time to get ahead.'
-    emoji = '🌅'
-  } else if (hour >= 8 && hour < 12) {
-    greeting = 'Good Morning'
-    subtitle = 'Fresh insights and opportunities await today.'
-    emoji = '☀️'
-  } else if (hour >= 12 && hour < 14) {
-    greeting = 'Good Noon'
-    subtitle = 'Take a moment to review what matters most.'
-    emoji = '🌤️'
-  } else if (hour >= 14 && hour < 17) {
-    greeting = 'Good Afternoon'
-    subtitle = 'Stay focused. Consistency compounds into results.'
-    emoji = '🚀'
-  } else if (hour >= 17 && hour < 20) {
-    greeting = 'Good Evening'
-    subtitle = 'Catch up on the latest updates and insights.'
-    emoji = '🌇'
-  } else if (hour >= 20 && hour < 23) {
-    greeting = 'Night Shift'
-    subtitle = 'Some of the best ideas arrive after sunset.'
-    emoji = '🌙'
-  } else {
-    greeting = 'Late Night'
-    subtitle = 'Building while the world sleeps.'
-    emoji = '✨'
-  }
-
-  const formattedDate = now.toLocaleDateString('en-US', {
-    weekday: 'long',
-    month: 'long',
-    day: 'numeric',
-  })
-
-  const formattedTime = now.toLocaleTimeString([], {
-    hour: '2-digit',
-    minute: '2-digit',
-  })
 
   return (
-    <div className="dash-page" style={{ paddingTop: '0.5rem' }}>
-      {/* ───────────────── Header ───────────────── */}
+    <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 12, overflow: 'hidden' }}>
+      <div style={{ padding: '0.85rem 1rem', borderBottom: '1px solid var(--border)', background: 'var(--bg-base)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <span style={{ fontFamily: 'var(--font-display)', fontSize: 13, fontWeight: 700, color: 'var(--text-primary)' }}>Recent Activity</span>
+        <button onClick={() => navigate('/history')} style={{ fontSize: 11, color: 'var(--accent)', background: 'none', border: 'none', cursor: 'pointer', fontWeight: 500 }}>
+          View all →
+        </button>
+      </div>
 
-      <div className="dash-page-header" style={{ marginBottom: '0' }}>
-        {/* Greeting Card */}
+      {loading ? (
+        <div style={{ padding: '1rem', display: 'flex', flexDirection: 'column', gap: 10 }}>
+          {[...Array(5)].map((_, i) => (
+            <div key={i} style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+              <div className="skeleton" style={{ width: 28, height: 28, borderRadius: 7, flexShrink: 0 }} />
+              <div style={{ flex: 1 }}>
+                <div className="skeleton" style={{ height: 11, width: '60%', marginBottom: 4 }} />
+                <div className="skeleton" style={{ height: 10, width: '40%' }} />
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : events.length === 0 ? (
+        <div style={{ padding: '2rem 1rem', textAlign: 'center', color: 'var(--text-faint)', fontSize: 13 }}>
+          No activity yet. Start by running research or uploading a PDF.
+        </div>
+      ) : (
+        <div>
+          {events.slice(0, 8).map((ev, i) => {
+            const meta    = EVENT_META[ev.event_type] || { icon: '⚡', color: 'var(--text-muted)', label: ev.event_type }
+            const payload = typeof ev.payload === 'string' ? JSON.parse(ev.payload || '{}') : (ev.payload || {})
+            const detail  = payload.topic || payload.name || payload.filename || ''
+            const handler = navForEvent(ev)
 
-        <div
-          className="dash-greeting-card"
+            return (
+              <div
+                key={ev.id || i}
+                onClick={handler || undefined}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 10, padding: '0.65rem 1rem',
+                  borderBottom: i < Math.min(events.length, 8) - 1 ? '1px solid var(--border)' : 'none',
+                  cursor: handler ? 'pointer' : 'default',
+                  transition: 'background .1s',
+                }}
+                onMouseEnter={e => { if (handler) e.currentTarget.style.background = 'var(--bg-base)' }}
+                onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}
+              >
+                <div style={{ width: 28, height: 28, background: 'var(--bg-base)', border: '1px solid var(--border)', borderRadius: 7, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, flexShrink: 0 }}>
+                  {meta.icon}
+                </div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 12.5, fontWeight: 500, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <span style={{ color: meta.color, fontWeight: 600 }}>{meta.label}</span>
+                    {detail && <span style={{ color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{detail}</span>}
+                  </div>
+                  <div style={{ fontSize: 10.5, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)' }}>{formatRelative(ev.created_at)}</div>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── Quick actions ─────────────────────────────────────────────────────────────
+function QuickActions() {
+  const navigate = useNavigate()
+  const actions = [
+    { icon: '🔬', label: 'New Research',  sub: 'AI-powered pipeline',  color: 'var(--accent)',  path: '/research' },
+    { icon: '📄', label: 'PDF Chat',      sub: 'Chat with documents',  color: '#8B5CF6',        path: '/pdf-chat' },
+    { icon: '📰', label: 'News Intel',    sub: 'AI news briefing',     color: '#F59E0B',        path: '/news' },
+    { icon: '📋', label: 'History',       sub: 'Past research',        color: 'var(--text-muted)', path: '/history' },
+  ]
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '0.75rem' }}>
+      {actions.map(a => (
+        <button
+          key={a.path}
+          onClick={() => navigate(a.path)}
           style={{
-            padding: '1.5rem 2rem',
-            borderRadius: '20px',
-            border: '1px solid var(--border)',
-            background:
-              'linear-gradient(135deg, rgba(99,102,241,.08), rgba(168,85,247,.05))',
-            backdropFilter: 'blur(14px)',
-            marginBottom: '1rem',
+            background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 10,
+            padding: '0.85rem', cursor: 'pointer', textAlign: 'left',
+            transition: 'border-color .15s, box-shadow .15s, transform .12s',
+            display: 'flex', flexDirection: 'column', gap: 4,
           }}
+          onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--border-strong)'; e.currentTarget.style.transform = 'translateY(-1px)'; e.currentTarget.style.boxShadow = 'var(--shadow)' }}
+          onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.transform = 'none'; e.currentTarget.style.boxShadow = 'none' }}
         >
-          <div
-            className="dash-greeting-inner"
-            style={{
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-              gap: '1.5rem',
-              flexWrap: 'wrap',
-            }}
-          >
-            <div>
-              <div
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '.75rem',
-                  marginBottom: '.6rem',
-                  flexWrap: 'wrap',
-                }}
-              >
-                <span
-                  className="dash-greeting-emoji"
-                  style={{ fontSize: '2rem' }}
-                >
-                  {emoji}
-                </span>
+          <span style={{ fontSize: '1.25rem', lineHeight: 1 }}>{a.icon}</span>
+          <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--text-primary)' }}>{a.label}</span>
+          <span style={{ fontSize: 11, color: 'var(--text-faint)' }}>{a.sub}</span>
+        </button>
+      ))}
+    </div>
+  )
+}
 
-                <span
-                  className="dash-greeting-text"
-                  style={{
-                    fontSize: 'clamp(1.1rem,4vw,1.75rem)',
-                    fontWeight: 800,
-                    letterSpacing: '-0.04em',
-                  }}
-                >
-                  {greeting},{' '}
-                  <span
-                    style={{
-                      background:
-                        'linear-gradient(135deg,var(--accent,#6366f1),var(--accent-violet,#a855f7))',
-                      WebkitBackgroundClip: 'text',
-                      WebkitTextFillColor: 'transparent',
-                    }}
-                  >
-                    Welcome Back
-                  </span>
-                </span>
-              </div>
+// ── Main Page ─────────────────────────────────────────────────────────────────
+export default function AIDashboardPage() {
+  const { user } = useAuth()
+  const greet    = getGreeting()
+  const now      = new Date()
 
-              <p
-                style={{
-                  margin: 0,
-                  fontSize: 'clamp(0.85rem,2.5vw,1.05rem)',
-                  opacity: 0.8,
-                  lineHeight: 1.6,
-                  maxWidth: '600px',
-                }}
-              >
-                {subtitle}
-              </p>
+  const [activity,     setActivity]     = useState([])
+  const [actLoading,   setActLoading]   = useState(true)
+  const [stats,        setStats]        = useState({ research: 0, pdfs: 0, news: 0 })
+
+  const {
+    weather, weatherLoading, weatherError,
+    weatherInput, setWeatherInput, fetchWeather,
+    safety, safetyLoading, safetyError,
+    safetyInput, setSafetyInput, fetchSafety,
+    headlines, headlinesLoading, headlinesError,
+    headlinesTopic, setHeadlinesTopic, fetchHeadlines,
+    chatMessages, chatInput, setChatInput,
+    chatLoading, chatError, sendChat,
+  } = useDashboard()
+
+  // Load activity + stats
+  useEffect(() => {
+    if (!user) return
+    Promise.all([
+      apiClient.get('/api/activity?limit=20'),
+      apiClient.get('/api/history/recent'),
+    ]).then(([actRes, recentRes]) => {
+      setActivity(actRes.data?.events || [])
+      const r = recentRes.data || {}
+      setStats({
+        research: r.research?.length || 0,
+        pdfs:     r.pdf?.length      || 0,
+        news:     r.news?.length     || 0,
+      })
+    }).catch(() => {}).finally(() => setActLoading(false))
+  }, [user])
+
+  const initialLoading = weatherLoading && headlinesLoading && chatMessages.length === 0 && actLoading
+  if (initialLoading) return <DashboardSkeleton />
+
+  return (
+    <div className="page-container page-fade">
+
+      {/* Greeting header */}
+      <div style={{ marginBottom: '1.75rem' }}>
+        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16 }}>
+          <div>
+            <div style={{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.1em', color: 'var(--accent)', fontFamily: 'var(--font-mono)', marginBottom: 6 }}>
+              {now.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}
             </div>
-
-            <div>
-              <div
-                className="dash-greeting-time"
-                style={{
-                  fontSize: 'clamp(1.6rem,6vw,2.5rem)',
-                  fontWeight: 900,
-                  letterSpacing: '-0.05em',
-                }}
-              >
-                {formattedTime}
-              </div>
-
-              <div
-                className="dash-greeting-date"
-                style={{
-                  opacity: 0.7,
-                  fontSize: 'clamp(0.8rem,2vw,1rem)',
-                  marginTop: '.2rem',
-                }}
-              >
-                {formattedDate}
-              </div>
-            </div>
+            <h1 style={{ fontFamily: 'var(--font-display)', fontSize: 'clamp(1.4rem,4vw,2rem)', fontWeight: 700, color: 'var(--text-primary)', letterSpacing: '-0.035em', marginBottom: 4 }}>
+              {greet.emoji} {greet.text}, {user?.username || 'Researcher'}
+            </h1>
+            <p style={{ fontSize: 14, color: 'var(--text-muted)' }}>{greet.sub}</p>
+          </div>
+          <div style={{ fontFamily: 'var(--font-mono)', fontSize: '1.1rem', fontWeight: 700, color: 'var(--text-faint)', flexShrink: 0 }}>
+            {now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
           </div>
         </div>
-
-        {/* Title */}
-
-        <h1
-          className="page-title"
-          style={{
-            fontSize: 'clamp(1.6rem,5vw,3rem)',
-            fontWeight: 900,
-            letterSpacing: '-0.06em',
-            marginBottom: '.5rem',
-          }}
-        >
-          <span style={{ marginRight: '.5rem' }}>🌐</span>
-
-          <span
-            style={{
-              background:
-                'linear-gradient(135deg,var(--accent,#6366f1),var(--accent-violet,#a855f7))',
-              WebkitBackgroundClip: 'text',
-              WebkitTextFillColor: 'transparent',
-            }}
-          >
-            AI Dashboard
-          </span>
-        </h1>
-
-        <p
-          className="page-subtitle"
-          style={{
-            fontSize: 'clamp(0.85rem,2.5vw,1.1rem)',
-            maxWidth: '800px',
-            lineHeight: 1.7,
-            opacity: 0.8,
-          }}
-        >
-          Live weather, breaking headlines, travel intelligence, and
-          AI-powered assistance in one unified workspace.
-        </p>
       </div>
 
-      {/* ───────────────── Top Grid ───────────────── */}
+      {/* Quick actions */}
+      <div style={{ marginBottom: '1.5rem' }}>
+        <QuickActions />
+      </div>
 
-      <div className="dash-top-grid">
+      {/* Stats row */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '0.75rem', marginBottom: '1.5rem' }}>
+        <StatCard icon="🔬" label="Research runs"  value={stats.research} sub="recent sessions" color="var(--accent)" onClick={() => window.location.href='/history?tab=research'} />
+        <StatCard icon="📄" label="PDF sessions"   value={stats.pdfs}     sub="documents indexed" color="#8B5CF6" onClick={() => window.location.href='/pdf-chat'} />
+        <StatCard icon="📰" label="News topics"    value={stats.news}     sub="topics tracked" color="#F59E0B" onClick={() => window.location.href='/news'} />
+      </div>
+
+      {/* Main grid */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '1rem', marginBottom: '1rem' }}>
         <WeatherCard
-          weather={weather}
-          loading={weatherLoading}
-          error={weatherError}
-          cityInput={weatherInput}
-          setCityInput={setWeatherInput}
-          onFetch={fetchWeather}
+          weather={weather} loading={weatherLoading} error={weatherError}
+          cityInput={weatherInput} setCityInput={setWeatherInput} onFetch={fetchWeather}
         />
-
-        <TravelSafetyCard
-          safety={safety}
-          loading={safetyLoading}
-          error={safetyError}
-          destInput={safetyInput}
-          setDestInput={setSafetyInput}
-          onFetch={fetchSafety}
-        />
-
         <HeadlinesFeed
-          headlines={headlines}
-          loading={headlinesLoading}
-          error={headlinesError}
-          topic={headlinesTopic}
-          setTopic={setHeadlinesTopic}
-          onFetch={fetchHeadlines}
+          headlines={headlines} loading={headlinesLoading} error={headlinesError}
+          topic={headlinesTopic} setTopic={setHeadlinesTopic} onFetch={fetchHeadlines}
+        />
+        <TravelSafetyCard
+          safety={safety} loading={safetyLoading} error={safetyError}
+          destInput={safetyInput} setDestInput={setSafetyInput} onFetch={fetchSafety}
         />
       </div>
 
-      {/* ───────────────── AI Chat ───────────────── */}
-
-      <DashboardChat
-        messages={chatMessages}
-        input={chatInput}
-        setInput={setChatInput}
-        loading={chatLoading}
-        error={chatError}
-        onSend={sendChat}
-      />
-
-      {/* ───────────────── Activity Feed ───────────────── */}
-
-      <div style={{ marginTop: '1.5rem' }}>
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            marginBottom: '10px',
-          }}
-        >
-          <h3
-            style={{
-              fontSize: 11,
-              fontWeight: 700,
-              textTransform: 'uppercase',
-              letterSpacing: '0.1em',
-              color: '#71717a',
-            }}
-          >
-            Recent Activity
-          </h3>
-
-          <span
-            style={{
-              fontSize: 11,
-              color: '#52525b',
-            }}
-          >
-            across all features
-          </span>
-        </div>
-
-        <ActivityFeed limit={12} />
+      {/* Bottom row: Activity + Chat */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+        <ActivityFeedCard events={activity} loading={actLoading} />
+        <DashboardChat
+          messages={chatMessages} input={chatInput} setInput={setChatInput}
+          loading={chatLoading} error={chatError} onSend={sendChat}
+        />
       </div>
+
+      <style>{`
+        @media (max-width: 1100px) {
+          .dash-top-grid { grid-template-columns: 1fr 1fr !important; }
+        }
+        @media (max-width: 768px) {
+          .dash-top-grid { grid-template-columns: 1fr !important; }
+        }
+      `}</style>
     </div>
   )
 }

@@ -83,7 +83,7 @@ export function ActivityFeed({ limit = 15 }) {
   if (loading) return (
     <div style={{ padding: '1rem 0' }}>
       {[1,2,3].map(i => (
-        <div key={i} style={{ height: 44, background: 'rgba(255,255,255,0.03)', borderRadius: 10, marginBottom: 6, animation: 'pulse 1.5s ease-in-out infinite' }} />
+        <div key={i} style={{ height: 44, background: 'var(--bg-card)', borderRadius: 10, marginBottom: 6, animation: 'pulse 1.5s ease-in-out infinite' }} />
       ))}
     </div>
   )
@@ -110,12 +110,12 @@ export function ActivityFeed({ limit = 15 }) {
             style={{
               display: 'flex', alignItems: 'center', gap: 10,
               padding: '9px 12px', borderRadius: 10, cursor: 'pointer',
-              background: 'rgba(255,255,255,0.03)',
-              border: '1px solid rgba(255,255,255,0.06)',
+              background: 'var(--bg-card)',
+              border: '1px solid var(--border)',
               transition: 'background .12s',
             }}
-            onMouseEnter={e => e.currentTarget.style.background = 'rgba(255,255,255,0.06)'}
-            onMouseLeave={e => e.currentTarget.style.background = 'rgba(255,255,255,0.03)'}
+            onMouseEnter={e => e.currentTarget.style.background = 'var(--bg-card-hover)'}
+            onMouseLeave={e => e.currentTarget.style.background = 'var(--bg-card)'}
           >
             <span style={{ fontSize: 16, flexShrink: 0 }}>{meta.icon}</span>
             <div style={{ flex: 1, minWidth: 0 }}>

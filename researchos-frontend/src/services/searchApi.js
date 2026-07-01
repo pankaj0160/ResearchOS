@@ -16,6 +16,14 @@ export const searchApi = {
    */
   globalSearch: (query) =>
     apiClient.get(`/api/search?q=${encodeURIComponent(query)}`),
+
+  // Alias used by CommandPalette — keeps call sites clean
+  global: (query) =>
+    apiClient.get(`/api/search?q=${encodeURIComponent(query)}`),
+
+  // Alias used by AppShell sidebar search — searches research history
+  history: (query) =>
+    apiClient.get(`/api/search?q=${encodeURIComponent(query)}`),
 }
 
 export default searchApi

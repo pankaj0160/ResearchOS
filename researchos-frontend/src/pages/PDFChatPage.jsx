@@ -66,7 +66,7 @@ export default function PDFChatPage() {
   const [loadingSessions,   setLoadingSessions]   = useState(true)
 
   const {
-    uploading, uploadProgress, uploadError, uploadFile,
+    uploading, uploadProgress, uploadStage, uploadError, uploadFile,
     session, sessions, loadSessions, switchSession, deleteSession,
     messages, input, setInput, responding, chatError, sendMessage, clearChat, reset,
     bottomRef,
@@ -94,9 +94,10 @@ export default function PDFChatPage() {
 
   // Fill the input with a suggested prompt then immediately send
   const handleSuggest = useCallback((label) => {
-    setInput(label)
-    setTimeout(() => sendMessage(), 50)
-  }, [setInput, sendMessage])
+    // Pass label directly to sendMessage — do NOT call setInput then sendMessage()
+    // because setInput is async and sendMessage() with no args crashes (.trim on undefined)
+    sendMessage(label)
+  }, [sendMessage])
 
   return (
     <>
@@ -139,6 +140,7 @@ export default function PDFChatPage() {
                     sessions={sessions}
                     uploading={uploading}
                     uploadProgress={uploadProgress}
+                    uploadStage={uploadStage}
                     uploadError={uploadError}
                     onFile={uploadFile}
                     onSwitch={(s) => { switchSession(s); setMobileSidebarOpen(false) }}

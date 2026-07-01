@@ -29,7 +29,7 @@ import {
 function HistoryCardSkeleton() {
   return (
     <div style={{
-      border:       '0.5px solid var(--color-border-tertiary, #e0ddd5)',
+      border:       '0.5px solid var(--border)',
       borderRadius: '10px',
       padding:      '14px 16px',
       display:      'flex',

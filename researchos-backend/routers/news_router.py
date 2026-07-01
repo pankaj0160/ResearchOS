@@ -346,3 +346,4 @@ async def dashboard_chat(body: dict, current_user: CurrentUser = None):
         media_type="text/event-stream",
         headers=_SSE_HEADERS,
     )
+# eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxIiwiZXhwIjoxNzgzMTQ0NTA2fQ.LK5ltljy0CtkKkCvvpf7IECUV7-0GRVmHZDTZH1lgtg

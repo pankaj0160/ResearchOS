@@ -1,417 +1,402 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
-import { useNavigate, useSearchParams } from 'react-router-dom'
-import { useAuth }   from '../context/AuthContext'
-import { searchApi } from '../services/searchApi'
+/**
+ * HistoryPage.jsx
+ * Location: src/pages/HistoryPage.jsx
+ *
+ * What this page does:
+ *   Shows a unified timeline of all user activity across every feature.
+ *   Left panel: scrollable list of past items (Research, PDF, News).
+ *   Right panel: full content of the selected item.
+ *
+ * Key fixes vs previous version:
+ *   - Calls /api/history/unified (the new endpoint we built in Week 1)
+ *   - Clicking a research item loads /api/history/{id} for full report
+ *   - Feature tabs filter by type (All / Research / PDF / News)
+ *   - Full markdown report rendered with proper formatting
+ *   - Skeleton loading on both panels
+ *   - Empty states for each feature type
+ */
 
+import { useState, useEffect, useCallback } from 'react'
+import ReactMarkdown from 'react-markdown'
+import { apiClient } from '../services/apiClient'
 
-import { API_BASE_URL } from '../services/config.js'
-const BASE = API_BASE_URL
+// ── Icons ─────────────────────────────────────────────────────────────────────
+const SearchIcon  = () => <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+const FileIcon    = () => <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+const NewsIcon    = () => <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M4 22h16a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2H8a2 2 0 0 0-2 2v16a2 2 0 0 0-2 2Zm0 0a2 2 0 0 1-2-2v-9c0-1.1.9-2 2-2h2"/><path d="M18 14h-8M15 18h-5M10 6h8v4h-8V6z"/></svg>
+const ClockIcon   = () => <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+function formatDate(ts) {
+  if (!ts) return ''
+  const d = new Date(typeof ts === 'number' ? ts * 1000 : ts)
+  const now = new Date()
+  const diff = (now - d) / 1000
+
+  if (diff < 60)    return 'just now'
+  if (diff < 3600)  return `${Math.floor(diff / 60)}m ago`
+  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`
+  if (diff < 604800) return `${Math.floor(diff / 86400)}d ago`
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+}
+
+const TYPE_META = {
+  research: { label: 'Research', Icon: SearchIcon,  color: 'var(--accent)' },
+  rag:      { label: 'PDF Chat', Icon: FileIcon,     color: '#8B5CF6' },
+  news:     { label: 'News',     Icon: NewsIcon,     color: '#F59E0B' },
+}
 
 const TABS = [
-  { id: 'research', label: 'Research',  icon: '🔬', color: '#818cf8' },
-  { id: 'pdf',      label: 'PDF Chat',  icon: '📄', color: '#2dd4bf' },
-  { id: 'news',     label: 'News',       icon: '📰', color: '#fbbf24' },
-  { id: 'activity', label: 'All Activity', icon: '⚡', color: '#c084fc' },
+  { key: 'all',      label: 'All' },
+  { key: 'research', label: 'Research' },
+  { key: 'pdf',      label: 'PDF' },
+  { key: 'news',     label: 'News' },
 ]
 
-const SOURCE_BADGE = {
-  pdf:           { label: 'PDF',          bg: 'rgba(20,184,166,.12)',  color: '#2dd4bf' },
-  research_run:  { label: 'From Research', bg: 'rgba(99,102,241,.12)', color: '#818cf8' },
-  text_ingest:   { label: 'Text Import',   bg: 'rgba(34,197,94,.12)',  color: '#4ade80' },
+// ── Skeleton loaders ──────────────────────────────────────────────────────────
+
+function ListSkeleton() {
+  return (
+    <div style={{ padding: '0.5rem' }}>
+      {[...Array(6)].map((_, i) => (
+        <div key={i} style={{ padding: '0.75rem 0.5rem', borderBottom: '1px solid var(--border)', display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <div className="skeleton" style={{ height: 10, width: '30%' }} />
+          <div className="skeleton" style={{ height: 13, width: '85%' }} />
+          <div className="skeleton" style={{ height: 10, width: '50%' }} />
+        </div>
+      ))}
+    </div>
+  )
 }
 
-function fmtDate(ts) {
-  if (!ts) return '—'
-  const d = typeof ts === 'string' ? new Date(ts) : new Date(ts * 1000)
-  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+function DetailSkeleton() {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 12, padding: '1.5rem' }}>
+      <div className="skeleton" style={{ height: 28, width: '70%' }} />
+      <div className="skeleton" style={{ height: 14, width: '40%' }} />
+      <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {[100, 90, 95, 80, 92, 75, 88].map((w, i) => (
+          <div key={i} className="skeleton" style={{ height: 13, width: `${w}%` }} />
+        ))}
+      </div>
+    </div>
+  )
 }
-function fmtTime(ts) {
-  if (!ts) return ''
-  const d = typeof ts === 'string' ? new Date(ts) : new Date(ts * 1000)
-  return d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })
-}
+
+// ── Main Page ─────────────────────────────────────────────────────────────────
 
 export default function HistoryPage() {
-  const [searchParams, setSearchParams] = useSearchParams()
-  const navigate     = useNavigate()
-  const { getToken } = useAuth()
+  const [tab,        setTab]        = useState('all')
+  const [items,      setItems]      = useState([])
+  const [loading,    setLoading]    = useState(true)
+  const [selected,   setSelected]   = useState(null)   // the clicked history item
+  const [detail,     setDetail]     = useState(null)   // full content loaded from API
+  const [detailLoad, setDetailLoad] = useState(false)
+  const [error,      setError]      = useState(null)
 
-  const activeTab = searchParams.get('tab') ?? 'research'
-  const setTab = (t) => setSearchParams({ tab: t })
-
-  const [data,      setData]      = useState({})
-  const [loading,   setLoading]   = useState(true)
-  const [query,     setQuery]     = useState('')
-  const [srResults, setSrResults] = useState(null)  // null = not searching
-  const [srLoading, setSrLoading] = useState(false)
-  const [limit,     setLimit]     = useState(20)
-  const debounceRef = useRef(null)
-
-  const headers = useCallback(() => ({
-    Authorization: `Bearer ${getToken()}`
-  }), [getToken])
-
-  const load = useCallback(async () => {
-    setLoading(true)
-    try {
-      const res  = await fetch(`${BASE}/api/history/unified?limit=${limit}&feature=all`, { headers: headers() })
-      const json = await res.json()
-      setData(json)
-    } catch (e) { console.error(e) }
-    setLoading(false)
-  }, [limit, headers])
-
-  useEffect(() => { load() }, [load])
-
-  // Live search
+  // ── Load unified history ───────────────────────────────────────────────────
   useEffect(() => {
-    clearTimeout(debounceRef.current)
-    if (query.length < 2) { setSrResults(null); return }
-    debounceRef.current = setTimeout(async () => {
-      setSrLoading(true)
+    const load = async () => {
+      setLoading(true)
+      setError(null)
       try {
-        const d = await searchApi.history(query, 50)
-        setSrResults(d.results ?? [])
-      } catch (e) { console.error(e) }
-      setSrLoading(false)
-    }, 280)
-    return () => clearTimeout(debounceRef.current)
-  }, [query])
-
-  const deleteRun = async (id) => {
-    if (!confirm('Delete this research run? This cannot be undone.')) return
-    await fetch(`${BASE}/api/history/${id}`, { method: 'DELETE', headers: headers() })
+        const feature = tab === 'all' ? 'all' : tab === 'pdf' ? 'pdf' : tab
+        const res  = await apiClient.get(`/api/history/unified?feature=${feature}&limit=50`)
+        setItems(res.data?.items || [])
+      } catch (e) {
+        setError(e.message || 'Failed to load history')
+      } finally {
+        setLoading(false)
+      }
+    }
     load()
-  }
+  }, [tab])
 
-  const tabMeta = TABS.find(t => t.id === activeTab) ?? TABS[0]
+  // ── Load full detail when item is clicked ─────────────────────────────────
+  const loadDetail = useCallback(async (item) => {
+    setSelected(item)
+    setDetail(null)
+    setDetailLoad(true)
 
-  // Data for current tab
-  const tabData = {
-    research: srResults ?? data.research ?? [],
-    pdf:      data.pdf      ?? [],
-    news:     data.news     ?? [],
-    activity: data.activity ?? [],
-  }[activeTab] ?? []
+    try {
+      if (item.type === 'research') {
+        // Fetch the full research report (includes full report text)
+        const res = await apiClient.get(`/api/history/${item.id}`)
+        setDetail({ type: 'research', data: res.data })
 
-  return (
-    <div style={{ padding: '0', minHeight: '100vh', background: '#09090b' }}>
+      } else if (item.type === 'rag') {
+        // PDF sessions don't have a "full content" view — show metadata
+        setDetail({ type: 'rag', data: item })
 
-      {/* ── Premium header ── */}
-      <div style={{
-        padding: '2rem 2rem 0',
-        background: 'linear-gradient(180deg, rgba(99,102,241,0.06) 0%, transparent 100%)',
-        borderBottom: '1px solid rgba(255,255,255,0.07)',
-      }}>
-        <div style={{ maxWidth: 1100, margin: '0 auto' }}>
-          <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', flexWrap: 'wrap', gap: 16, marginBottom: '1.5rem' }}>
-            <div>
-              <p style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.15em', textTransform: 'uppercase', color: '#6366f1', marginBottom: 6 }}>ResearchOS</p>
-              <h1 style={{ fontSize: 'clamp(1.5rem,4vw,2.2rem)', fontWeight: 800, letterSpacing: '-.04em' }}>History</h1>
-              <p style={{ color: '#71717a', fontSize: 14, marginTop: 4 }}>Everything you've researched, read, and tracked</p>
-            </div>
+      } else if (item.type === 'news') {
+        // News topics — show topic info
+        setDetail({ type: 'news', data: item })
+      }
+    } catch (e) {
+      setDetail({ type: 'error', message: e.message })
+    } finally {
+      setDetailLoad(false)
+    }
+  }, [])
 
-            {/* Search bar */}
-            <div style={{ position: 'relative', width: 'min(340px,100%)' }}>
-              <span style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', fontSize: 15, opacity: 0.4 }}>⌕</span>
-              <input
-                value={query} onChange={e => setQuery(e.target.value)}
-                placeholder="Search all history…"
-                style={{
-                  width: '100%', paddingLeft: 36, paddingRight: 12, paddingTop: 9, paddingBottom: 9,
-                  background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)',
-                  borderRadius: 10, color: '#fafafa', fontSize: 14, fontFamily: 'inherit', outline: 'none',
-                }}
-              />
-              {srLoading && <span style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', fontSize: 11, color: '#6366f1' }}>…</span>}
+  // ── Render detail panel content ────────────────────────────────────────────
+  const renderDetail = () => {
+    if (detailLoad) return <DetailSkeleton />
+
+    if (!selected) return (
+      <div className="history-empty-detail">
+        <div style={{ fontSize: '2.5rem' }}>👈</div>
+        <p style={{ fontSize: 13, color: 'var(--text-muted)' }}>
+          Select an item from the list to view its full content
+        </p>
+      </div>
+    )
+
+    if (!detail) return <DetailSkeleton />
+
+    if (detail.type === 'error') return (
+      <div style={{ padding: '1.5rem' }}>
+        <div style={{ padding: '1rem', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 8, color: '#dc2626', fontSize: 13 }}>
+          Failed to load: {detail.message}
+        </div>
+      </div>
+    )
+
+    if (detail.type === 'research') {
+      const run = detail.data
+      return (
+        <div className="history-detail-body">
+          {/* Header meta */}
+          <div style={{ marginBottom: '1.5rem', paddingBottom: '1rem', borderBottom: '1px solid var(--border)' }}>
+            <h2 style={{ fontFamily: 'var(--font-display)', fontSize: '1.4rem', fontWeight: 700, color: 'var(--text-primary)', letterSpacing: '-0.03em', marginBottom: 8 }}>
+              {run.topic}
+            </h2>
+            <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', fontSize: 12, color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
+              {run.score && (
+                <span style={{ padding: '2px 8px', background: 'var(--gold-dim)', color: 'var(--gold)', border: '1px solid var(--gold-border)', borderRadius: 99, fontWeight: 700 }}>
+                  Score {run.score}/10
+                </span>
+              )}
+              {run.word_count > 0 && <span>{run.word_count.toLocaleString()} words</span>}
+              {run.source_count > 0 && <span>{run.source_count} sources</span>}
+              <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}><ClockIcon /> {formatDate(run.created_at)}</span>
             </div>
           </div>
 
-          {/* Tab strip */}
-          <div style={{ display: 'flex', gap: 2 }}>
-            {TABS.map(tab => (
+          {/* Copy button */}
+          <div style={{ marginBottom: '1rem', display: 'flex', gap: 8 }}>
+            <button
+              className="research-toolbar-btn"
+              onClick={() => {
+                navigator.clipboard.writeText(run.report || '')
+                  .then(() => alert('Report copied to clipboard!'))
+              }}
+            >
+              📋 Copy Report
+            </button>
+            <button
+              className="research-toolbar-btn"
+              onClick={() => {
+                const blob = new Blob([run.report || ''], { type: 'text/markdown' })
+                const url  = URL.createObjectURL(blob)
+                const a    = document.createElement('a')
+                a.href     = url
+                a.download = `${run.topic.slice(0, 40)}.md`
+                a.click()
+                URL.revokeObjectURL(url)
+              }}
+            >
+              ⬇️ Download .md
+            </button>
+          </div>
+
+          {/* Full report rendered as markdown */}
+          <div className="report-content">
+            <ReactMarkdown>{run.report || '_No report content available._'}</ReactMarkdown>
+          </div>
+
+          {/* Feedback / critique */}
+          {run.feedback && (
+            <div style={{ marginTop: '2rem', padding: '1rem', background: 'var(--bg-base)', border: '1px solid var(--border)', borderRadius: 10 }}>
+              <div style={{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.07em', color: 'var(--text-faint)', marginBottom: 8 }}>
+                AI Critique
+              </div>
+              <div className="report-content" style={{ fontSize: 13 }}>
+                <ReactMarkdown>{run.feedback}</ReactMarkdown>
+              </div>
+            </div>
+          )}
+        </div>
+      )
+    }
+
+    if (detail.type === 'rag') {
+      const s = detail.data
+      return (
+        <div className="history-detail-body">
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: '1.5rem' }}>
+            <div style={{ width: 48, height: 48, background: '#EDE9FE', color: '#8B5CF6', borderRadius: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 22 }}>📄</div>
+            <div>
+              <div style={{ fontFamily: 'var(--font-display)', fontSize: '1.1rem', fontWeight: 700, color: 'var(--text-primary)', letterSpacing: '-0.02em' }}>{s.title}</div>
+              <div style={{ fontSize: 12, color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', marginTop: 2 }}>
+                {s.page_count > 0 && `${s.page_count} pages · `}
+                {s.chunk_count > 0 && `${s.chunk_count} chunks · `}
+                {formatDate(s.created_at)}
+              </div>
+            </div>
+          </div>
+          <div style={{ padding: '1rem', background: 'var(--bg-card)', border: '1px solid var(--accent-border)', borderRadius: 10 }}>
+            <p style={{ fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.65 }}>
+              This PDF was processed and indexed for chat. To chat with this document again, open the <strong style={{ color: 'var(--text-primary)' }}>PDF Chat</strong> page and select this session.
+            </p>
+          </div>
+          <div style={{ marginTop: '1rem', display: 'flex', gap: 8 }}>
+            <a href="/pdf-chat" className="btn-primary" style={{ textDecoration: 'none', padding: '7px 16px', fontSize: 13 }}>
+              Open PDF Chat →
+            </a>
+          </div>
+        </div>
+      )
+    }
+
+    if (detail.type === 'news') {
+      const t = detail.data
+      return (
+        <div className="history-detail-body">
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: '1.5rem' }}>
+            <div style={{ width: 48, height: 48, background: '#FEF3C7', color: '#F59E0B', borderRadius: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 22 }}>📰</div>
+            <div>
+              <div style={{ fontFamily: 'var(--font-display)', fontSize: '1.1rem', fontWeight: 700, color: 'var(--text-primary)', letterSpacing: '-0.02em' }}>{t.title}</div>
+              <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>
+                Category: <strong>{t.category || 'general'}</strong> · Tracked {formatDate(t.created_at)}
+              </div>
+            </div>
+          </div>
+          <div style={{ marginTop: '1rem', display: 'flex', gap: 8 }}>
+            <a href={`/news?topic=${encodeURIComponent(t.title)}`} className="btn-primary" style={{ textDecoration: 'none', padding: '7px 16px', fontSize: 13 }}>
+              Search this topic again →
+            </a>
+          </div>
+        </div>
+      )
+    }
+
+    return null
+  }
+
+  return (
+    <div className="page-container page-fade">
+
+      {/* Page header */}
+      <div className="page-header">
+        <h1 className="page-title">
+          <span className="page-title-icon">📋</span>
+          History
+        </h1>
+        <p className="page-subtitle">
+          All your past research, PDF sessions, and news topics in one place.
+          Click any item to view its full content.
+        </p>
+      </div>
+
+      {/* Error banner */}
+      {error && (
+        <div style={{ marginBottom: '1rem', padding: '0.75rem 1rem', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 8, color: '#dc2626', fontSize: 13 }}>
+          {error}
+        </div>
+      )}
+
+      {/* Two-panel layout */}
+      <div className="history-layout">
+
+        {/* ── Left: List panel ── */}
+        <div className="history-list-panel">
+
+          {/* Header */}
+          <div className="history-list-header">
+            <span style={{ fontFamily: 'var(--font-display)', fontSize: 13, fontWeight: 700, color: 'var(--text-primary)' }}>
+              Activity
+            </span>
+            <span style={{ fontSize: 11, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)' }}>
+              {loading ? '...' : `${items.length} items`}
+            </span>
+          </div>
+
+          {/* Feature tabs */}
+          <div className="history-tabs">
+            {TABS.map(t => (
               <button
-                key={tab.id}
-                onClick={() => setTab(tab.id)}
-                style={{
-                  display: 'flex', alignItems: 'center', gap: 7,
-                  padding: '10px 18px', fontSize: 13, fontWeight: 600, cursor: 'pointer',
-                  background: 'transparent', border: 'none',
-                  borderBottom: activeTab === tab.id ? `2px solid ${tab.color}` : '2px solid transparent',
-                  color: activeTab === tab.id ? tab.color : '#71717a',
-                  transition: 'color .15s, border-color .15s',
-                  marginBottom: '-1px',
-                }}
+                key={t.key}
+                className={`history-tab${tab === t.key ? ' history-tab--active' : ''}`}
+                onClick={() => { setTab(t.key); setSelected(null); setDetail(null) }}
               >
-                <span>{tab.icon}</span>
-                <span>{tab.label}</span>
-                <span style={{
-                  fontSize: 10, fontWeight: 700, padding: '1px 7px', borderRadius: 999,
-                  background: activeTab === tab.id ? `${tab.color}20` : 'rgba(255,255,255,0.05)',
-                  color: activeTab === tab.id ? tab.color : '#52525b',
-                }}>
-                  {(tabData).length}
-                </span>
+                {t.label}
               </button>
             ))}
           </div>
-        </div>
-      </div>
 
-      {/* ── Content ── */}
-      <div style={{ maxWidth: 1100, margin: '0 auto', padding: '1.5rem 2rem' }}>
+          {/* List */}
+          <div className="history-item-list">
+            {loading ? (
+              <ListSkeleton />
+            ) : items.length === 0 ? (
+              <div className="empty-state" style={{ padding: '2rem 1rem' }}>
+                <div className="empty-state-icon">🔍</div>
+                <p style={{ fontSize: 13, color: 'var(--text-muted)' }}>
+                  No {tab === 'all' ? 'activity' : tab} history yet
+                </p>
+              </div>
+            ) : (
+              items.map(item => {
+                const meta   = TYPE_META[item.type] || TYPE_META.research
+                const Icon   = meta.Icon
+                const active = selected?.id === item.id && selected?.type === item.type
 
-        {loading && (
-          <div style={{ display: 'grid', gap: 10 }}>
-            {[1,2,3].map(i => <SkeletonCard key={i} />)}
-          </div>
-        )}
-
-        {!loading && tabData.length === 0 && (
-          <EmptyState tab={activeTab} tabMeta={tabMeta} navigate={navigate} />
-        )}
-
-        {!loading && activeTab === 'research' && (
-          <div style={{ display: 'grid', gap: 10 }}>
-            {tabData.map(run => (
-              <ResearchCard key={run.id} run={run} navigate={navigate} onDelete={deleteRun} token={getToken()} base={BASE} />
-            ))}
-            <LoadMoreBar limit={limit} setLimit={setLimit} total={tabData.length} color="#818cf8" />
-          </div>
-        )}
-
-        {!loading && activeTab === 'pdf' && (
-          <div style={{ display: 'grid', gap: 10 }}>
-            {tabData.map(s => <PDFCard key={s.session_id} session={s} navigate={navigate} />)}
-          </div>
-        )}
-
-        {!loading && activeTab === 'news' && (
-          <div style={{ display: 'grid', gap: 10 }}>
-            {tabData.map(t => <NewsCard key={t.id} topic={t} navigate={navigate} />)}
-          </div>
-        )}
-
-        {!loading && activeTab === 'activity' && (
-          <div style={{ display: 'grid', gap: 8 }}>
-            {tabData.map(ev => <ActivityRow key={ev.id} event={ev} navigate={navigate} />)}
-            <LoadMoreBar limit={limit} setLimit={setLimit} total={tabData.length} color="#c084fc" />
-          </div>
-        )}
-      </div>
-    </div>
-  )
-}
-
-// ── Sub-components ────────────────────────────────────────────────────────────
-
-function ResearchCard({ run, navigate, onDelete, token, base }) {
-  const score = run.score ? parseFloat(run.score) : null
-  const scoreColor = score >= 8 ? '#4ade80' : score >= 6 ? '#fbbf24' : '#f87171'
-
-  return (
-    <div style={{
-      background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)',
-      borderRadius: 14, padding: '1.1rem 1.25rem',
-      transition: 'border-color .15s, background .15s',
-      cursor: 'pointer',
-    }}
-      onMouseEnter={e => { e.currentTarget.style.background='rgba(255,255,255,0.05)'; e.currentTarget.style.borderColor='rgba(99,102,241,0.35)' }}
-      onMouseLeave={e => { e.currentTarget.style.background='rgba(255,255,255,0.03)'; e.currentTarget.style.borderColor='rgba(255,255,255,0.07)' }}
-      onClick={() => navigate(`/research?run_id=${run.id}`)}
-    >
-      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 14 }}>
-        {/* Accent bar */}
-        <div style={{ width: 3, borderRadius: 3, background: '#6366f1', alignSelf: 'stretch', flexShrink: 0, minHeight: 40 }} />
-
-        <div style={{ flex: 1, minWidth: 0 }}>
-          {/* Title row */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6, flexWrap: 'wrap' }}>
-            <span style={{ fontSize: '1rem', fontWeight: 700, color: '#fafafa', flex: 1, minWidth: 0 }}>
-              {run.topic}
-            </span>
-            {score !== null && (
-              <span style={{
-                fontSize: 12, fontWeight: 700, padding: '2px 10px', borderRadius: 999,
-                background: `${scoreColor}18`, color: scoreColor, border: `1px solid ${scoreColor}40`, flexShrink: 0,
-              }}>
-                {score}/10
-              </span>
+                return (
+                  <div
+                    key={`${item.type}-${item.id}`}
+                    className={`history-item${active ? ' history-item--active' : ''}`}
+                    onClick={() => loadDetail(item)}
+                  >
+                    <div className="history-item-type" style={{ color: meta.color }}>
+                      <Icon /> {meta.label}
+                    </div>
+                    <div className="history-item-title">{item.title}</div>
+                    <div className="history-item-meta">
+                      <span style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
+                        <ClockIcon /> {formatDate(item.created_at)}
+                      </span>
+                      {item.score != null && (
+                        <span style={{ color: 'var(--gold)' }}>★ {item.score}/10</span>
+                      )}
+                      {item.word_count > 0 && (
+                        <span>{item.word_count.toLocaleString()}w</span>
+                      )}
+                    </div>
+                  </div>
+                )
+              })
             )}
           </div>
+        </div>
 
-          {/* Excerpt */}
-          {run.excerpt && (
-            <p style={{ fontSize: 13, color: '#71717a', lineHeight: 1.6, marginBottom: 10, overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>
-              {run.excerpt}
-            </p>
+        {/* ── Right: Detail panel ── */}
+        <div className="history-detail-panel">
+          {selected && (
+            <div className="history-detail-header">
+              <div style={{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.07em', color: 'var(--text-faint)', marginBottom: 4 }}>
+                {TYPE_META[selected.type]?.label || 'Detail'}
+              </div>
+              <div style={{ fontFamily: 'var(--font-display)', fontSize: '1.05rem', fontWeight: 700, color: 'var(--text-primary)', letterSpacing: '-0.02em', lineHeight: 1.3 }}>
+                {selected.title}
+              </div>
+            </div>
           )}
-
-          {/* Meta + actions */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-            <span style={{ fontSize: 11, color: '#52525b' }}>{fmtDate(run.created_at)}</span>
-            {run.word_count > 0 && <span style={{ fontSize: 11, color: '#52525b' }}>{run.word_count?.toLocaleString()} words</span>}
-            {run.source_count > 0 && <span style={{ fontSize: 11, color: '#52525b' }}>{run.source_count} sources</span>}
-            <div style={{ flex: 1 }} />
-            <ActionBtn
-              label="Open" color="#818cf8"
-              onClick={e => { e.stopPropagation(); navigate(`/research?run_id=${run.id}`) }}
-            />
-            <ActionBtn
-              label="Export" color="#2dd4bf"
-              onClick={async e => {
-                e.stopPropagation()
-                const res  = await fetch(`${base}/api/history/${run.id}/export`, { headers: { Authorization: `Bearer ${token}` } })
-                const blob = await res.blob()
-                const url  = URL.createObjectURL(blob); const a = document.createElement('a')
-                a.href = url; a.download = `research-${run.id}.md`; a.click(); URL.revokeObjectURL(url)
-              }}
-            />
-            <ActionBtn
-              label="Delete" color="#f87171"
-              onClick={e => { e.stopPropagation(); onDelete(run.id) }}
-            />
-          </div>
+          {renderDetail()}
         </div>
+
       </div>
-    </div>
-  )
-}
-
-function PDFCard({ session, navigate }) {
-  const badge = SOURCE_BADGE[session.source_type] ?? SOURCE_BADGE.pdf
-  return (
-    <div
-      onClick={() => navigate(`/pdf-chat?session=${session.session_id}`)}
-      style={{
-        background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)',
-        borderRadius: 14, padding: '1rem 1.25rem', cursor: 'pointer',
-        display: 'flex', alignItems: 'center', gap: 14,
-      }}
-      onMouseEnter={e => { e.currentTarget.style.background='rgba(255,255,255,0.05)'; e.currentTarget.style.borderColor='rgba(20,184,166,0.3)' }}
-      onMouseLeave={e => { e.currentTarget.style.background='rgba(255,255,255,0.03)'; e.currentTarget.style.borderColor='rgba(255,255,255,0.07)' }}
-    >
-      <div style={{ width: 3, borderRadius: 3, background: '#2dd4bf', alignSelf: 'stretch', minHeight: 40, flexShrink: 0 }} />
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-          <span style={{ fontSize: '0.95rem', fontWeight: 700, color: '#fafafa', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{session.filename}</span>
-          <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 999, background: badge.bg, color: badge.color, flexShrink: 0 }}>{badge.label}</span>
-        </div>
-        <div style={{ display: 'flex', gap: 12 }}>
-          <span style={{ fontSize: 11, color: '#52525b' }}>{fmtDate(session.created_at)}</span>
-          {session.chunk_count > 0 && <span style={{ fontSize: 11, color: '#52525b' }}>{session.chunk_count} chunks</span>}
-        </div>
-      </div>
-      <span style={{ fontSize: 13, color: '#52525b' }}>→</span>
-    </div>
-  )
-}
-
-function NewsCard({ topic, navigate }) {
-  return (
-    <div
-      onClick={() => navigate(`/news?topic=${encodeURIComponent(topic.topic)}&category=${topic.category}`)}
-      style={{
-        background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)',
-        borderRadius: 14, padding: '1rem 1.25rem', cursor: 'pointer',
-        display: 'flex', alignItems: 'center', gap: 14,
-      }}
-      onMouseEnter={e => { e.currentTarget.style.background='rgba(255,255,255,0.05)'; e.currentTarget.style.borderColor='rgba(245,158,11,0.3)' }}
-      onMouseLeave={e => { e.currentTarget.style.background='rgba(255,255,255,0.03)'; e.currentTarget.style.borderColor='rgba(255,255,255,0.07)' }}
-    >
-      <div style={{ width: 3, borderRadius: 3, background: '#fbbf24', alignSelf: 'stretch', minHeight: 36, flexShrink: 0 }} />
-      <div style={{ flex: 1 }}>
-        <div style={{ fontSize: '0.95rem', fontWeight: 700, color: '#fafafa', marginBottom: 3 }}>{topic.topic}</div>
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-          <span style={{ fontSize: 11, padding: '1px 8px', borderRadius: 999, background: 'rgba(245,158,11,0.1)', color: '#fbbf24' }}>{topic.category}</span>
-          <span style={{ fontSize: 11, color: '#52525b' }}>Tracked since {fmtDate(topic.created_at)}</span>
-        </div>
-      </div>
-      <span style={{ fontSize: 13, color: '#52525b' }}>→</span>
-    </div>
-  )
-}
-
-const ACT_META = {
-  research_run:      { icon: '🔬', color: '#818cf8', label: 'Research',  url: p => `/research?run_id=${p.run_id}` },
-  pdf_upload:        { icon: '📄', color: '#2dd4bf', label: 'PDF Upload', url: p => `/pdf-chat?session=${p.session_id}` },
-  text_ingested:     { icon: '💾', color: '#4ade80', label: 'Saved Doc',  url: p => `/pdf-chat?session=${p.session_id}` },
-  news_search:       { icon: '📰', color: '#fbbf24', label: 'News',       url: p => `/news?topic=${encodeURIComponent(p.topic||'')}` },
-  workspace_created: { icon: '📁', color: '#c084fc', label: 'Workspace',  url: p => `/workspace/${p.workspace_id}` },
-}
-
-function ActivityRow({ event, navigate }) {
-  const m = ACT_META[event.event_type] ?? { icon: '⚡', color: '#71717a', label: event.event_type, url: () => '/' }
-  const p = event.payload ?? {}
-  const title = p.topic || p.name || p.filename || p.title || event.event_type
-  return (
-    <div
-      onClick={() => navigate(m.url(p))}
-      style={{
-        display: 'flex', alignItems: 'center', gap: 12, padding: '9px 14px',
-        borderRadius: 10, cursor: 'pointer',
-        background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.05)',
-      }}
-      onMouseEnter={e => e.currentTarget.style.background='rgba(255,255,255,0.05)'}
-      onMouseLeave={e => e.currentTarget.style.background='rgba(255,255,255,0.02)'}
-    >
-      <span style={{ fontSize: 16, flexShrink: 0 }}>{m.icon}</span>
-      <span style={{ fontSize: 11, fontWeight: 700, color: m.color, textTransform: 'uppercase', letterSpacing: '0.07em', flexShrink: 0, minWidth: 70 }}>{m.label}</span>
-      <span style={{ fontSize: 13, color: '#fafafa', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{title}</span>
-      <span style={{ fontSize: 11, color: '#52525b', flexShrink: 0 }}>{fmtDate(event.created_at)}, {fmtTime(event.created_at)}</span>
-    </div>
-  )
-}
-
-function ActionBtn({ label, color, onClick }) {
-  return (
-    <button onClick={onClick} style={{
-      padding: '4px 12px', fontSize: 11, fontWeight: 700, cursor: 'pointer',
-      background: `${color}12`, border: `1px solid ${color}30`,
-      borderRadius: 6, color,
-    }}>{label}</button>
-  )
-}
-
-function LoadMoreBar({ limit, setLimit, total, color }) {
-  if (total < limit) return null
-  return (
-    <div style={{ textAlign: 'center', paddingTop: 12 }}>
-      <button onClick={() => setLimit(l => l + 20)} style={{
-        padding: '8px 24px', fontSize: 13, fontWeight: 600, cursor: 'pointer',
-        background: `${color}10`, border: `1px solid ${color}30`, borderRadius: 8, color,
-      }}>Load more</button>
-    </div>
-  )
-}
-
-function SkeletonCard() {
-  return (
-    <div style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)', borderRadius: 14, padding: '1rem 1.25rem', display: 'flex', flexDirection: 'column', gap: 8 }}>
-      <div style={{ height: 18, width: '60%', background: 'rgba(255,255,255,0.06)', borderRadius: 6 }} />
-      <div style={{ height: 14, width: '85%', background: 'rgba(255,255,255,0.04)', borderRadius: 5 }} />
-      <div style={{ height: 14, width: '40%', background: 'rgba(255,255,255,0.03)', borderRadius: 5 }} />
-    </div>
-  )
-}
-
-function EmptyState({ tab, tabMeta, navigate }) {
-  const actions = {
-    research: { cta: 'Start a research run', path: '/research' },
-    pdf:      { cta: 'Upload a PDF',          path: '/pdf-chat' },
-    news:     { cta: 'Track a topic',          path: '/news' },
-    activity: { cta: 'Start using ResearchOS', path: '/dashboard' },
-  }
-  const action = actions[tab]
-  return (
-    <div style={{ textAlign: 'center', padding: '4rem 0' }}>
-      <div style={{ fontSize: 48, marginBottom: 16 }}>{tabMeta.icon}</div>
-      <p style={{ fontSize: 16, fontWeight: 700, color: '#fafafa', marginBottom: 8 }}>No {tabMeta.label} history yet</p>
-      <p style={{ fontSize: 13, color: '#52525b', marginBottom: 20 }}>Your activity will appear here once you get started.</p>
-      <button onClick={() => navigate(action.path)} style={{
-        padding: '9px 20px', fontSize: 13, fontWeight: 700, cursor: 'pointer',
-        background: tabMeta.color + '18', border: `1px solid ${tabMeta.color}40`, borderRadius: 10, color: tabMeta.color,
-      }}>{action.cta}</button>
     </div>
   )
 }

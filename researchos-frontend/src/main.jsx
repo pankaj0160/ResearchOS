@@ -59,6 +59,7 @@ import { ToastProvider }         from './context/ToastContext'
 
 // ── Error boundary ────────────────────────────────────────────────────────────
 import ErrorBoundary from './components/ErrorBoundary'
+import ErrorPage     from './pages/ErrorPage'
 
 // ── Layout — EAGER (always needed when logged in) ─────────────────────────────
 import AppShell from './components/Layout/AppShell'
@@ -114,14 +115,14 @@ function PageLoader() {
       <div style={{
         width:           '32px',
         height:          '32px',
-        border:          '2.5px solid var(--color-border-secondary, #e0ddd5)',
-        borderTopColor:  'var(--color-text-primary, #1a1916)',
+        border:          '2.5px solid var(--border)',
+        borderTopColor:  'var(--text-primary)',
         borderRadius:    '50%',
         animation:       'spin 0.7s linear infinite',
       }} />
       <span style={{
         fontSize: '13px',
-        color:    'var(--color-text-tertiary, #888780)',
+        color:    'var(--text-faint)',
       }}>
         Loading…
       </span>
@@ -239,6 +240,12 @@ function App() {
             </ErrorBoundary>
           } />
 
+          <Route path="/workspace" element={
+            <ErrorBoundary pageName="Workspace">
+              <WorkspacePage />
+            </ErrorBoundary>
+          } />
+
           <Route path="/workspace/:id" element={
             <ErrorBoundary pageName="Workspace">
               <WorkspacePage />
@@ -267,7 +274,7 @@ function App() {
 
 
         {/* ── Fallback — unknown URLs go to landing ── */}
-        <Route path="*" element={<Navigate to="/" replace />} />
+        <Route path="*" element={<ErrorPage code={404} />} />
 
       </Routes>
     </Suspense>

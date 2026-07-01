@@ -30,7 +30,7 @@ function SessionItemSkeleton() {
       alignItems:   'flex-start',
       padding:      '10px 12px',
       borderRadius: '8px',
-      border:       '0.5px solid var(--color-border-tertiary, #e0ddd5)',
+      border:       '0.5px solid var(--border)',
       marginBottom: '6px',
     }}>
       {/* File icon circle */}
@@ -75,7 +75,7 @@ export default function PDFSessionsSkeleton({ count = 4 }) {
 
       {/* Upload zone skeleton */}
       <div style={{
-        border:         '1.5px dashed var(--color-border-secondary, #c8c4bc)',
+        border:         '1.5px dashed var(--border-strong)',
         borderRadius:   '10px',
         padding:        '20px',
         display:        'flex',

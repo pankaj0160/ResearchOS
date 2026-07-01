@@ -262,7 +262,7 @@ export default function NewsPage() {
           gap: 8px;
           margin: 0 0 1rem;
           padding: 10px 0;
-          border-bottom: 1px solid var(--color-border, rgba(0,0,0,0.08));
+          border-bottom: 1px solid var(--border);
         }
 
         .news-two-col {
@@ -288,14 +288,14 @@ export default function NewsPage() {
           border-radius: 8px;
           cursor: pointer;
           transition: background 0.15s, opacity 0.15s, transform 0.1s;
-          border: 1px solid var(--color-border, rgba(0,0,0,0.12));
-          background: var(--color-surface, #fff);
-          color: var(--color-text, #111);
+          border: 1px solid var(--border);
+          background: var(--bg-card);
+          color: var(--text-primary);
           white-space: nowrap;
         }
 
         .news-action-btn:hover:not(:disabled) {
-          background: var(--color-surface-hover, #f3f4f6);
+          background: var(--bg-card-hover);
           transform: translateY(-1px);
         }
 
@@ -329,37 +329,6 @@ export default function NewsPage() {
           color: #16a34a;
         }
 
-        /* Dark mode */
-        .dark .news-action-btn,
-        [data-theme="dark"] .news-action-btn {
-          background: rgba(255,255,255,0.05);
-          border-color: rgba(255,255,255,0.1);
-          color: #e4e4e7;
-        }
-        .dark .news-action-btn:hover:not(:disabled),
-        [data-theme="dark"] .news-action-btn:hover:not(:disabled) {
-          background: rgba(255,255,255,0.09);
-        }
-        .dark .news-action-btn--primary,
-        [data-theme="dark"] .news-action-btn--primary {
-          background: #6366f1;
-          border-color: #6366f1;
-          color: #fff;
-        }
-        .dark .news-action-btn--research,
-        [data-theme="dark"] .news-action-btn--research {
-          background: rgba(245,158,11,0.1);
-          border-color: rgba(245,158,11,0.25);
-          color: #fbbf24;
-        }
-        .dark .news-action-btn--success,
-        [data-theme="dark"] .news-action-btn--success {
-          color: #4ade80;
-        }
-        .dark .news-action-bar,
-        [data-theme="dark"] .news-action-bar {
-          border-color: rgba(255,255,255,0.07);
-        }
       `}</style>
     </div>
   )

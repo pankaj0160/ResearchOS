@@ -45,8 +45,13 @@ export default function RegisterPage() {
     }
     setLoading(true)
     try {
-      const data = await authApi.register(email, username, password)
-      login(data.token, data.user)
+      const res  = await authApi.register(email, username, password)
+      // authApi.register returns apiClient envelope: { ok, data: { token, user }, status }
+      if (!res.ok) {
+        setError(res.error || 'Registration failed — please try again')
+        return
+      }
+      login(res.data.token, res.data.user)
       navigate('/dashboard', { replace: true })
     } catch (err) {
       setError(err.message)

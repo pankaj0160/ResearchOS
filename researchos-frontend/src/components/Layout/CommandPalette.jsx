@@ -65,8 +65,10 @@ export function CommandPalette({ open, onClose }) {
     if (q.length < 2) { setResults({}); setLoading(false); return }
     setLoading(true)
     try {
-      const data = await searchApi.global(q)
-      setResults(data.results ?? {})
+      const res = await searchApi.global(q)
+      // apiClient returns { ok, data: { results: {...} }, status }
+      // Must unwrap .data before reading .results
+      setResults(res?.data?.results ?? {})
       setActive(0)
     } catch (e) {
       console.error('[CommandPalette] search error:', e)

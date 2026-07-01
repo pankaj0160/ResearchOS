@@ -53,13 +53,13 @@ export default function ProfilePage() {
           font-size: clamp(1.4rem, 4vw, 1.9rem);
           font-weight: 800;
           letter-spacing: -0.03em;
-          color: var(--color-text, inherit);
+          color: var(--text-primary);
           margin: 0 0 2rem;
         }
 
         .profile-card {
-          background: var(--color-surface, #fff);
-          border: 1px solid var(--color-border, rgba(0,0,0,0.1));
+          background: var(--bg-card);
+          border: 1px solid var(--border);
           border-radius: 14px;
           padding: 1.5rem;
           margin-bottom: 1rem;
@@ -82,7 +82,7 @@ export default function ProfilePage() {
 
         .account-field-label {
           font-size: 11px;
-          color: var(--color-text-muted, #888);
+          color: var(--text-muted);
           margin: 0 0 4px;
           font-weight: 500;
           text-transform: uppercase;
@@ -92,7 +92,7 @@ export default function ProfilePage() {
         .account-field-value {
           font-size: 14px;
           font-weight: 600;
-          color: var(--color-text, inherit);
+          color: var(--text-primary);
           margin: 0;
         }
 
@@ -104,7 +104,7 @@ export default function ProfilePage() {
           display: block;
           font-size: 12px;
           font-weight: 600;
-          color: var(--color-text-muted, #555);
+          color: var(--text-muted);
           margin-bottom: 7px;
           text-transform: uppercase;
           letter-spacing: 0.07em;
@@ -115,10 +115,10 @@ export default function ProfilePage() {
           padding: 10px 14px;
           font-size: 14px;
           font-family: inherit;
-          background: var(--color-input-bg, #f5f5f7);
-          border: 1.5px solid var(--color-input-border, rgba(0,0,0,0.12));
+          background: var(--bg-base);
+          border: 1.5px solid var(--border);
           border-radius: 10px;
-          color: var(--color-text, #111);
+          color: var(--text-primary);
           outline: none;
           transition: border-color 0.15s;
           box-sizing: border-box;
@@ -126,12 +126,12 @@ export default function ProfilePage() {
 
         .form-input:focus {
           border-color: #6366f1;
-          background: var(--color-input-bg-focus, #fafafe);
+          background: var(--bg-card);
         }
 
         .form-hint {
           font-size: 11px;
-          color: var(--color-text-faint, #aaa);
+          color: var(--text-faint);
           margin: 5px 0 0;
         }
 
@@ -171,7 +171,7 @@ export default function ProfilePage() {
         }
 
         .session-card {
-          background: var(--color-surface, #fff);
+          background: var(--bg-card);
           border: 1px solid rgba(239, 68, 68, 0.2);
           border-radius: 14px;
           padding: 1.5rem;
@@ -188,7 +188,7 @@ export default function ProfilePage() {
 
         .session-desc {
           font-size: 13px;
-          color: var(--color-text-muted, #888);
+          color: var(--text-muted);
           margin: 0 0 14px;
         }
 
@@ -212,32 +212,32 @@ export default function ProfilePage() {
         /* Dark mode overrides */
         @media (prefers-color-scheme: dark) {
           .form-input {
-            background: rgba(255,255,255,0.06);
-            border-color: rgba(255,255,255,0.1);
+            background: var(--bg-card-hover);
+            border-color: var(--border-strong);
             color: #fafafa;
           }
           .form-input:focus {
-            background: rgba(255,255,255,0.09);
+            background: var(--bg-card-hover);
           }
         }
 
         /* Explicit dark class support (for manual toggle) */
         .dark .form-input,
         [data-theme="dark"] .form-input {
-          background: rgba(255,255,255,0.06);
-          border-color: rgba(255,255,255,0.1);
+          background: var(--bg-card-hover);
+          border-color: var(--border-strong);
           color: #fafafa;
         }
         .dark .form-input:focus,
         [data-theme="dark"] .form-input:focus {
-          background: rgba(255,255,255,0.09);
+          background: var(--bg-card-hover);
         }
         .dark .profile-card,
         [data-theme="dark"] .profile-card,
         .dark .session-card,
         [data-theme="dark"] .session-card {
-          background: rgba(255,255,255,0.03);
-          border-color: rgba(255,255,255,0.08);
+          background: var(--bg-card);
+          border-color: var(--border);
         }
         .dark .profile-title,
         [data-theme="dark"] .profile-title {

@@ -26,8 +26,8 @@ export const RelatedContentPanel = React.memo(function RelatedContentPanel({ run
 
   if (!hasContent) return (
     <aside style={{
-      background: 'rgba(255,255,255,0.02)',
-      border: '1px solid rgba(255,255,255,0.07)',
+      background: 'var(--bg-card)',
+      border: '1px solid var(--border)',
       borderRadius: 14, padding: '1rem',
     }}>
       <p style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.1em', color: '#52525b', marginBottom: 8 }}>
@@ -41,8 +41,8 @@ export const RelatedContentPanel = React.memo(function RelatedContentPanel({ run
 
   return (
     <aside style={{
-      background: 'rgba(255,255,255,0.02)',
-      border: '1px solid rgba(255,255,255,0.07)',
+      background: 'var(--bg-card)',
+      border: '1px solid var(--border)',
       borderRadius: 14, padding: '1rem',
     }}>
       <p style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.1em', color: '#6366f1', marginBottom: 12 }}>
@@ -102,7 +102,7 @@ function RelatedItem({ icon, text, sub, onClick }) {
       style={{
         display: 'flex', alignItems: 'center', gap: 8,
         padding: '5px 0', cursor: 'pointer',
-        borderBottom: '1px solid rgba(255,255,255,0.04)',
+        borderBottom: '1px solid var(--border)',
       }}
     >
       <span style={{ fontSize: 13, flexShrink: 0 }}>{icon}</span>

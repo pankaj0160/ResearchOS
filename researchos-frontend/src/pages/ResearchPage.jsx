@@ -1,68 +1,62 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react'
-import { useSearchParams, useNavigate } from 'react-router-dom'  // NEW
-import TopicInput   from '../components/Research/TopicInput'
-import PipelineFlow from '../components/Research/PipelineFlow'
-import ExecutionLog from '../components/Research/ExecutionLog'
-import ReportViewer from '../components/Research/ReportViewer'
-import { RelatedContentPanel } from '../components/Research/RelatedContentPanel'
-import { useSSEStream } from '../hooks/useSSEStream'
-import { useWorkspace } from '../context/WorkspaceContext'  // NEW
-import { MiniHistoryStrip } from '../components/History/MiniHistoryStrip'
+/**
+ * ResearchPage.jsx — Premium Research Pipeline UI
+ * Location: src/pages/ResearchPage.jsx
+ *
+ * Changes:
+ *  - Premium page header with gradient accent line
+ *  - Metric cards upgraded with color coding
+ *  - Error banner uses CSS vars (dark mode safe)
+ *  - Layout tightened for better vertical rhythm
+ *  - All hardcoded colors replaced with CSS vars
+ */
 
-import { API_BASE_URL as BASE_URL } from '../services/config.js'
+import React, { useCallback, useEffect, useRef, useState } from 'react'
+import { useSearchParams }       from 'react-router-dom'
+import TopicInput                from '../components/Research/TopicInput'
+import PipelineFlow              from '../components/Research/PipelineFlow'
+import ExecutionLog              from '../components/Research/ExecutionLog'
+import ReportViewer              from '../components/Research/ReportViewer'
+import { RelatedContentPanel }   from '../components/Research/RelatedContentPanel'
+import { useSSEStream }          from '../hooks/useSSEStream'
+import { useWorkspace }          from '../context/WorkspaceContext'
+import { MiniHistoryStrip }      from '../components/History/MiniHistoryStrip'
+import { apiClient }             from '../services/apiClient'
 
 export default function ResearchPage() {
-  const [searchParams] = useSearchParams()  // NEW
-  const navigate       = useNavigate()       // NEW
-  const { activeWorkspace } = useWorkspace() // NEW
-  const startedRef = useRef(false)           // prevents double-start in StrictMode
+  const [searchParams]      = useSearchParams()
+  const { activeWorkspace } = useWorkspace()
+  const startedRef          = useRef(false)
 
   const {
     rawLogs, milestones, collapsedMilestoneCount,
     steps, report, feedback,
     runStatus, error, topic, isRunning, isDone,
-    runId, ragSessionId,   // NEW — capture from hook
+    runId, ragSessionId,
     start, reset, retry,
   } = useSSEStream()
 
-  // ── NEW: Load old run if ?run_id= is in the URL ──────────────────────────
-  const [loadedRun, setLoadedRun] = useState(null)  // holds a fetched historical run
+  const [loadedRun, setLoadedRun] = useState(null)
 
+  // Load historical run from ?run_id= URL param
   useEffect(() => {
     const runIdParam = searchParams.get('run_id')
     if (!runIdParam) { setLoadedRun(null); return }
-
-    const token = localStorage.getItem('researchos_token')
-    fetch(`${BASE_URL}/api/history/${runIdParam}`, {
-      headers: { Authorization: `Bearer ${token}` }
-    })
-      .then(r => r.json())
-      .then(data => {
-        if (data.id) setLoadedRun(data)
-      })
+    apiClient.get(`/api/history/${runIdParam}`)
+      .then(res => { if (res.data?.id) setLoadedRun(res.data) })
       .catch(console.error)
   }, [searchParams])
 
-  // ── NEW: Auto-start if ?topic= is in the URL ─────────────────────────────
+  // Auto-start from ?topic= URL param
   useEffect(() => {
     const topicParam = searchParams.get('topic')
-
-    if (!topicParam) return
-
-    // allow a new URL topic to trigger a new run
-    if (topicParam === topic) return
-
+    if (!topicParam || topicParam === topic) return
     startedRef.current = true
-
-    const t = setTimeout(() => {
-      start(topicParam, activeWorkspace?.id ?? null)
-    }, 300)
-
+    const t = setTimeout(() => start(topicParam, activeWorkspace?.id ?? null), 300)
     return () => clearTimeout(t)
   }, [searchParams, topic, start, activeWorkspace])
 
   const handleStart = useCallback(
-    (nextTopic) => start(nextTopic, activeWorkspace?.id ?? null),  // NEW: pass workspace
+    (nextTopic) => start(nextTopic, activeWorkspace?.id ?? null),
     [start, activeWorkspace]
   )
   const handleReset = useCallback(() => {
@@ -71,55 +65,83 @@ export default function ResearchPage() {
     startedRef.current = false
   }, [reset])
 
-  // Decide what to show in ReportViewer — live run takes priority over loaded run
   const displayReport   = report   || loadedRun?.report   || ''
   const displayFeedback = feedback || loadedRun?.feedback || ''
   const displayTopic    = topic    || loadedRun?.topic    || ''
   const displayRunId    = runId    || loadedRun?.id       || null
-  const displayRagId    = ragSessionId
 
   const completedSteps = Object.values(steps).filter(s => s.status === 'done').length
-  const totalSteps     = Object.values(steps).length
+  const totalSteps     = Object.values(steps).length || 4
   const reportWords    = displayReport.split(/\s+/).filter(Boolean).length
-  const critiqueWords  = displayFeedback.split(/\s+/).filter(Boolean).length
 
   return (
     <div style={{ background: 'var(--bg-base)', color: 'var(--text-primary)', minHeight: '100%' }}>
-      <main
-        className="research-main-container"
-        style={{ maxWidth: '1400px', margin: '0 auto', display: 'grid', gap: '1.25rem', padding: '1.25rem 1.5rem' }}
-      >
-        {/* Header — unchanged */}
-        <section style={{ paddingTop: '0.25rem', paddingBottom: '0.25rem' }}>
-          <div className="research-header-row" style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'flex-end', justifyContent: 'space-between', gap: '1rem' }}>
+      <main style={{ maxWidth: 1400, margin: '0 auto', padding: '1.25rem 1.5rem', display: 'grid', gap: '1.25rem' }}>
+
+        {/* ── Page header ── */}
+        <section>
+          {/* Accent line */}
+          <div style={{ width: 32, height: 3, background: 'var(--accent)', borderRadius: 2, marginBottom: '0.75rem' }} />
+          <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'flex-end', justifyContent: 'space-between', gap: '1rem' }}>
             <div>
-              <p style={{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.12em', color: 'var(--accent)', fontFamily: 'var(--font-mono)', marginBottom: '0.25rem' }}>
-                Multi-Agent Research
+              <p style={{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.12em', color: 'var(--accent)', fontFamily: 'var(--font-mono)', margin: '0 0 0.25rem' }}>
+                Multi-Agent Pipeline
               </p>
-              <h1 className="research-title" style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 'clamp(1.3rem, 4vw, 1.85rem)', letterSpacing: '-0.03em', color: 'var(--text-primary)', margin: '0 0 0.3rem' }}>
+              <h1 style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 'clamp(1.3rem,4vw,1.85rem)', letterSpacing: '-0.03em', color: 'var(--text-primary)', margin: '0 0 0.3rem' }}>
                 Research Workspace
               </h1>
-              <p style={{ maxWidth: '480px', fontSize: 13.5, color: 'var(--text-muted)', lineHeight: 1.6, margin: 0 }}>
-                AI-powered pipeline with real-time execution, quality critique, and traceable sources.
+              <p style={{ fontSize: 13.5, color: 'var(--text-muted)', lineHeight: 1.6, margin: 0, maxWidth: 480 }}>
+                AI-powered pipeline — Search → Read → Write → Critique — with real-time streaming and quality scoring.
               </p>
             </div>
             <RunStatusBadge status={runStatus} isDone={isDone} />
           </div>
         </section>
 
-        {/* Metrics — unchanged */}
-        <section className="research-metrics-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '0.75rem' }}>
-          <MetricCard label="Pipeline" value={`${completedSteps}/${totalSteps}`} detail="stages completed" />
-          <MetricCard label="Report"   value={reportWords   ? reportWords.toLocaleString()   : '0'} detail="words generated" />
-          <MetricCard label="Critique" value={critiqueWords ? critiqueWords.toLocaleString() : '0'} detail="review words" />
-        </section>
+        {/* ── Metric cards ── */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: '0.75rem' }}>
+          <MetricCard
+            label="Pipeline"
+            value={`${completedSteps}/${totalSteps}`}
+            detail="stages completed"
+            accent={completedSteps === totalSteps && totalSteps > 0}
+          />
+          <MetricCard
+            label="Report"
+            value={reportWords ? reportWords.toLocaleString() : '—'}
+            detail="words generated"
+            accent={reportWords > 0}
+          />
+          <MetricCard
+            label="Quality"
+            value={(() => {
+              const m = displayFeedback.match(/Score:\s*(\d+(?:\.\d+)?)\/10/i)
+              return m ? `${m[1]}/10` : '—'
+            })()}
+            detail="AI critique score"
+            accent={!!displayFeedback.match(/Score:\s*(\d+(?:\.\d+)?)\/10/i)}
+          />
+        </div>
 
+        {/* ── Error banner ── */}
         {error && (
-          <div role="alert" style={{ borderRadius: 8, border: '1px solid #fecaca', background: '#fef2f2', padding: '10px 14px', fontSize: 13, fontWeight: 500, color: '#dc2626' }}>
-            {error}
+          <div role="alert" style={{
+            borderRadius: 8,
+            border: '1px solid #fecaca',
+            background: 'rgba(220,38,38,0.08)',
+            padding: '10px 14px',
+            fontSize: 13,
+            fontWeight: 500,
+            color: '#dc2626',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+          }}>
+            ⚠️ {error}
           </div>
         )}
 
+        {/* ── Topic input ── */}
         <TopicInput
           onStart={handleStart}
           onClear={handleReset}
@@ -129,21 +151,20 @@ export default function ResearchPage() {
           currentTopic={displayTopic}
         />
 
+        {/* ── Recent research sidebar strip ── */}
         <MiniHistoryStrip feature="research" />
 
-        <div className="pipeline-flow-container" style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
+        {/* ── Pipeline flow visualization ── */}
+        <div style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
           <PipelineFlow steps={steps} />
         </div>
 
-        <div className="research-bottom-grid" style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) 420px', gap: '1.25rem', alignItems: 'start' }}>
-          {/* Two-column layout: report left, related content right (only when run exists) */}
+        {/* ── Report + Execution log ── */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) 400px', gap: '1.25rem', alignItems: 'start' }}>
+
+          {/* Left: report viewer (+ related panel when done) */}
           {isDone && displayReport ? (
-            <div style={{
-              display: 'grid',
-              gridTemplateColumns: displayRunId ? '1fr 280px' : '1fr',
-              gap: '1.25rem',
-              alignItems: 'start',
-            }}>
+            <div style={{ display: 'grid', gridTemplateColumns: displayRunId ? '1fr 260px' : '1fr', gap: '1rem' }}>
               <ReportViewer
                 report={displayReport}
                 feedback={displayFeedback}
@@ -151,7 +172,7 @@ export default function ResearchPage() {
                 error={error}
                 topic={displayTopic}
                 runId={displayRunId}
-                ragSessionId={displayRagId}
+                ragSessionId={ragSessionId}
               />
               {displayRunId && <RelatedContentPanel runId={displayRunId} />}
             </div>
@@ -163,72 +184,76 @@ export default function ResearchPage() {
               error={error}
               topic={displayTopic}
               runId={displayRunId}
-              ragSessionId={displayRagId}
+              ragSessionId={ragSessionId}
             />
           )}
-          <div className="execution-log-panel">
-            <ExecutionLog
-              milestones={milestones}
-              rawLogs={rawLogs}
-              collapsedCount={collapsedMilestoneCount}
-              isRunning={isRunning}
-            />
-          </div>
+
+          {/* Right: execution log */}
+          <ExecutionLog
+            milestones={milestones}
+            rawLogs={rawLogs}
+            collapsedCount={collapsedMilestoneCount}
+            isRunning={isRunning}
+          />
         </div>
 
       </main>
 
       <style>{`
-        @media (max-width: 768px) {
-          .research-metrics-grid { grid-template-columns: 1fr !important; }
-          .research-bottom-grid  { grid-template-columns: 1fr !important; }
-          .research-main-container { padding: 12px !important; }
+        @media (max-width: 900px) {
+          main > div:last-child { grid-template-columns: 1fr !important; }
+          main > div:nth-child(2) { grid-template-columns: 1fr !important; }
+        }
+        @media (max-width: 600px) {
+          main { padding: 0.75rem !important; }
         }
       `}</style>
     </div>
   )
 }
 
+// ── Sub-components ────────────────────────────────────────────────────────────
 
 const RunStatusBadge = React.memo(function RunStatusBadge({ status, isDone }) {
-  const labels = {
-    idle: 'Ready', loading: 'Loading', running: 'Pipeline Running',
-    generating_report: 'Generating Report', completed: 'Report Ready', failed: 'Failed',
+  const map = {
+    idle:              { label: 'Ready',             color: 'var(--text-faint)',  bg: 'var(--bg-card)',    border: 'var(--border)' },
+    running:           { label: 'Pipeline Running',  color: 'var(--accent)',      bg: 'var(--accent-dim)', border: 'var(--accent-border)' },
+    generating_report: { label: 'Writing Report…',   color: 'var(--accent)',      bg: 'var(--accent-dim)', border: 'var(--accent-border)' },
+    completed:         { label: 'Report Ready',      color: '#16a34a',            bg: '#f0fdf4',           border: '#bbf7d0' },
+    failed:            { label: 'Failed',            color: '#dc2626',            bg: 'rgba(220,38,38,0.08)', border: '#fecaca' },
   }
-  const color  = status === 'failed' ? '#dc2626' : isDone ? '#16a34a' : 'var(--accent)'
-  const bg     = status === 'failed' ? '#fef2f2' : isDone ? '#f0fdf4' : 'var(--accent-dim)'
-  const border = status === 'failed' ? '#fecaca' : isDone ? '#bbf7d0' : 'var(--accent-border)'
-
+  const cfg = map[status] || map.idle
   return (
     <div style={{
-      display: 'inline-flex', alignItems: 'center', gap: 8,
-      borderRadius: 999, border: `1px solid ${border}`,
-      background: bg, padding: '6px 14px', fontSize: 12, fontWeight: 600, color,
+      display: 'inline-flex', alignItems: 'center', gap: 7,
+      borderRadius: 999, border: `1px solid ${cfg.border}`,
+      background: cfg.bg, padding: '5px 14px',
+      fontSize: 12, fontWeight: 600, color: cfg.color,
       whiteSpace: 'nowrap', flexShrink: 0,
     }}>
-      <span style={{ width: 7, height: 7, borderRadius: '50%', background: color, flexShrink: 0 }} />
-      {labels[status] ?? 'Ready'}
+      <span style={{
+        width: 6, height: 6, borderRadius: '50%', background: cfg.color, flexShrink: 0,
+        animation: (status === 'running' || status === 'generating_report') ? 'pulse 1.5s infinite' : 'none',
+      }} />
+      {cfg.label}
+      <style>{`@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }`}</style>
     </div>
   )
 })
-const MetricCard = React.memo(function MetricCard({ label, value, detail }) {
+
+const MetricCard = React.memo(function MetricCard({ label, value, detail, accent }) {
   return (
     <div style={{
-      borderRadius: 10, border: '1px solid var(--border)',
-      background: 'var(--bg-card)', padding: '0.85rem',
+      borderRadius: 10,
+      border: `1px solid ${accent ? 'var(--accent-border)' : 'var(--border)'}`,
+      background: accent ? 'var(--accent-dim)' : 'var(--bg-card)',
+      padding: '0.875rem',
+      transition: 'border-color .2s, background .2s',
     }}>
-      <p style={{
-        fontSize: 10, fontWeight: 600, textTransform: 'uppercase',
-        letterSpacing: '0.1em', color: 'var(--text-muted)',
-        fontFamily: 'var(--font-mono)', margin: 0,
-      }}>
+      <p style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.1em', color: accent ? 'var(--accent)' : 'var(--text-faint)', fontFamily: 'var(--font-mono)', margin: 0 }}>
         {label}
       </p>
-      <p style={{
-        marginTop: 6, fontSize: 'clamp(1.1rem, 3vw, 1.5rem)',
-        fontWeight: 700, color: 'var(--text-primary)',
-        fontFamily: 'var(--font-display)', letterSpacing: '-0.02em', margin: '6px 0 4px',
-      }}>
+      <p style={{ margin: '6px 0 4px', fontSize: 'clamp(1.1rem,3vw,1.5rem)', fontWeight: 800, color: accent ? 'var(--accent)' : 'var(--text-primary)', fontFamily: 'var(--font-display)', letterSpacing: '-0.02em' }}>
         {value}
       </p>
       <p style={{ fontSize: 11.5, color: 'var(--text-muted)', margin: 0 }}>{detail}</p>

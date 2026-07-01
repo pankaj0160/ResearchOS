@@ -1,7 +1,7 @@
 import { useCallback, useState } from 'react'
 
 /** Drag-and-drop + click-to-browse PDF uploader with progress bar */
-export function PDFUploadZone({ onFile, uploading, progress, error }) {
+export function PDFUploadZone({ onFile, uploading, progress, stage, error }) {
   const [dragging, setDragging] = useState(false)
 
   const handleFile = useCallback((file) => {
@@ -33,8 +33,8 @@ export function PDFUploadZone({ onFile, uploading, progress, error }) {
           <div className="rag-upload-progress-icon">
             <SpinnerIcon />
           </div>
-          <p className="rag-upload-progress-label">Ingesting document…</p>
-          <p className="rag-upload-progress-hint">Chunking and embedding — this takes a few seconds</p>
+          <p className="rag-upload-progress-label">{progress >= 100 ? "Ready!" : progress >= 90 ? "Saving index…" : progress >= 40 ? "Embedding…" : "Processing…"}</p>
+          <p className="rag-upload-progress-hint">{stage || "Chunking and embedding — this takes a few seconds"}</p>
           <div className="rag-progress-bar">
             <div className="rag-progress-fill" style={{ width: `${progress}%` }} />
           </div>

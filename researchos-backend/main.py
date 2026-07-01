@@ -156,10 +156,14 @@ async def lifespan(app: FastAPI):
     if database_url:
         try:
             db_pool = await asyncpg.create_pool(
-                dsn             = database_url,
-                min_size        = 2,    # always-warm connections (instant response)
-                max_size        = 10,   # Supabase free-tier safe ceiling
-                command_timeout = 30,   # seconds before a slow query raises error
+                dsn                 = database_url,
+                min_size            = 2,    # always-warm connections (instant response)
+                max_size            = 10,   # Supabase free-tier safe ceiling
+                command_timeout     = 30,   # seconds before a slow query raises error
+                statement_cache_size= 0,    # REQUIRED for Supabase Session pooler (port 5432)
+                                            # Session pooler doesn't support prepared statements
+                                            # Without this: every query silently falls back to
+                                            # sync connection → 1-10 second response times
             )
             mode = "Supavisor pooler" if "pooler.supabase.com" in database_url else "direct"
             print(f"[DB Pool] Connected ({mode}) — min=2 max=10 connections ready")
@@ -309,10 +313,10 @@ async def add_process_time_header(request: Request, call_next):
 # ═══════════════════════════════════════════════════════════════════════════════
 
 app.include_router(auth_router)
+app.include_router(workspace_router)   # MUST be before research_router — /api/history/recent + /unified must register before /api/history/{run_id}
 app.include_router(research_router)
 app.include_router(rag_router)
 app.include_router(news_router)
-app.include_router(workspace_router)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

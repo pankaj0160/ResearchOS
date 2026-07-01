@@ -8,6 +8,7 @@ import { ragApi } from '../services/ragApi'
 export function usePDFChat() {
   // ── Upload state ─────────────────────────────────────────────────────────
   const [uploadProgress, setUploadProgress] = useState(0)   // 0-100
+  const [uploadStage,    setUploadStage]    = useState('')    // stage text from backend
   const [uploading,      setUploading]      = useState(false)
   const [uploadError,    setUploadError]    = useState('')
 
@@ -42,17 +43,23 @@ export function usePDFChat() {
       const meta = await ragApi.upload(file, pct => setUploadProgress(pct))
       console.log('upload meta:', meta)   // ← ADD THIS LINE
 
-      // Step 2: poll until ingestion is done
+      // Step 2: poll /api/rag/progress until embedding is done
+      // waitUntilReady shows fine-grained percentage: "Embedding chunk 45/120..."
       setUploadProgress(10)
-      const ready = await ragApi.getStatus(meta.data.session_id)
+      const sessionId = meta.data?.session_id || meta.data?.id
+      const ready = await ragApi.waitUntilReady(
+        sessionId,
+        (pct, stage) => {
+          setUploadProgress(pct)
+          setUploadStage(stage || '')
+        }
+      )
 
-      if (!ready.ok) {
-        throw new Error(ready.error)
-      }
-
-      setSession(ready.data)
+      // Step 3: session is ready — set it with full metadata
+      setUploadProgress(100)
+      setSession(ready)
       setMessages([])
-      return ready.data
+      return ready
 
     } catch (err) {
       setUploadError(err.message)
@@ -65,11 +72,8 @@ export function usePDFChat() {
   // ── Load existing sessions ────────────────────────────────────────────────
   const loadSessions = useCallback(async () => {
     try {
-      const result = await ragApi.getSessions()
-
-      if (!result.ok) return
-
-      setSessions(result.data.sessions ?? [])
+      const res  = await ragApi.getSessions()
+      setSessions(res?.data?.sessions ?? [])
     } catch { /* silent */ }
   }, [])
 
@@ -78,19 +82,8 @@ export function usePDFChat() {
     setSession(sess)
     setChatError('')
     try {
-      const result = await ragApi.getHistory(sess.session_id)
-
-      if (!result.ok) {
-         setMessages([])
-         return
-      }
-
-      const msgs = (result.data.messages ?? []).map(m => ({
-        id: nextId(),
-        role: m.role,
-        content: m.content,
-      }))
-
+      const res  = await ragApi.getHistory(sess.session_id)
+      const msgs = (res?.data?.messages ?? []).map(m => ({ id: nextId(), role: m.role, content: m.content }))
       setMessages(msgs)
     } catch {
       setMessages([])
@@ -100,11 +93,7 @@ export function usePDFChat() {
   // ── Delete a session ─────────────────────────────────────────────────────
   const deleteSession = useCallback(async (sessionId) => {
     try {
-      const result = await ragApi.deleteSession(sessionId)
-
-      if (!result.ok) {
-        throw new Error(result.error)
-      }
+      await ragApi.deleteSession(sessionId)
       setSessions(prev => prev.filter(s => s.session_id !== sessionId))
       if (session?.session_id === sessionId) {
         setSession(null)
@@ -175,11 +164,12 @@ export function usePDFChat() {
     setChatError('')
     setUploadError('')
     setUploadProgress(0)
+    setUploadStage('Uploading...')
   }, [])
 
   return {
     // upload
-    uploading, uploadProgress, uploadError, uploadFile,
+    uploading, uploadProgress, uploadStage, uploadError, uploadFile,
     // sessions
     session, sessions, loadSessions, switchSession, deleteSession,
     // chat

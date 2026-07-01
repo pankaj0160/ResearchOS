@@ -20,11 +20,6 @@
 }
 
 @media (max-width: 768px) {
-  /* Hide the desktop sidebar entirely */
-  .app-shell-sidebar {
-    display: none !important;
-  }
-
   /* Make main content fill full width */
   .app-shell-main {
     padding: 16px 16px 80px !important; /* bottom padding for nav bar */

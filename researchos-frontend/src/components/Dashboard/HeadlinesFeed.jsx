@@ -76,7 +76,7 @@ function HeadlineItem({ headline, index }) {
   const topic = headline.title || ''
 
   return (
-    <div className="headline-item" style={{ display: 'flex', alignItems: 'flex-start', gap: 10, padding: '10px 0', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+    <div className="headline-item" style={{ display: 'flex', alignItems: 'flex-start', gap: 10, padding: '10px 0', borderBottom: '1px solid var(--border)' }}>
       <span className="headline-index" style={{ flexShrink: 0, marginTop: 3 }}>{index + 1}</span>
       <div style={{ flex: 1, minWidth: 0 }}>
 

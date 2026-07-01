@@ -1,199 +1,323 @@
+/**
+ * ReportViewer.jsx
+ * Location: src/components/Research/ReportViewer.jsx
+ *
+ * Premium research report viewer.
+ * Key fixes:
+ *  - Removed ALL Tailwind classes (dark:bg-slate-900 etc) — they don't work
+ *    without Tailwind installed. Replaced with CSS variables.
+ *  - ReactMarkdown + remarkGfm for proper table/code/heading rendering
+ *  - Copy + Download toolbar
+ *  - Score badge with color coding
+ *  - Smooth streaming cursor while report is generating
+ */
+
 import { memo, useCallback, useMemo, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
-import remarkGfm from 'remark-gfm'
-import { useNavigate } from 'react-router-dom'   // NEW
+import remarkGfm    from 'remark-gfm'
+import { useNavigate } from 'react-router-dom'
 
-function ReportViewer({ report, feedback, status, error, topic, runId, ragSessionId, }) {
-  const navigate = useNavigate()  // NEW
-  const [copied, setCopied] = useState(false)
-  const hasReport = report.trim().length > 0
+// ── Status label helper ───────────────────────────────────────────────────────
+function statusLabel(status, hasReport, hasFeedback) {
+  if (status === 'failed')           return 'Pipeline failed — see error above'
+  if (status === 'completed')        return hasFeedback ? 'Report + AI critique ready' : 'Report ready'
+  if (status === 'generating_report') return 'Writing report…'
+  if (status === 'running')          return 'Research pipeline running…'
+  if (hasReport)                     return 'Report ready'
+  return 'Start a research topic above'
+}
+
+// ── Score badge ───────────────────────────────────────────────────────────────
+function ScoreBadge({ feedback }) {
+  const match = feedback?.match(/Score:\s*(\d+(?:\.\d+)?)\/10/i)
+  if (!match) return null
+  const score = parseFloat(match[1])
+  const color = score >= 8 ? '#16a34a' : score >= 6 ? '#ca8a04' : '#dc2626'
+  const bg    = score >= 8 ? '#f0fdf4' : score >= 6 ? '#fefce8' : '#fef2f2'
+  const border= score >= 8 ? '#bbf7d0' : score >= 6 ? '#fde68a' : '#fecaca'
+
+  return (
+    <div style={{
+      display:     'inline-flex',
+      alignItems:  'center',
+      gap:         5,
+      padding:     '3px 10px',
+      background:  bg,
+      border:      `1px solid ${border}`,
+      borderRadius: 999,
+      fontSize:    12,
+      fontWeight:  700,
+      color,
+      fontFamily:  'var(--font-mono)',
+    }}>
+      ★ {score}/10
+    </div>
+  )
+}
+
+// ── Toolbar button ────────────────────────────────────────────────────────────
+function ToolbarBtn({ onClick, disabled, children, accent }) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      style={{
+        display:      'flex',
+        alignItems:   'center',
+        gap:          5,
+        padding:      '5px 12px',
+        background:   accent ? 'var(--accent)' : 'var(--bg-base)',
+        border:       `1px solid ${accent ? 'var(--accent)' : 'var(--border)'}`,
+        borderRadius: 8,
+        color:        accent ? '#fff' : 'var(--text-secondary)',
+        fontSize:     12,
+        fontWeight:   600,
+        cursor:       disabled ? 'not-allowed' : 'pointer',
+        opacity:      disabled ? 0.5 : 1,
+        transition:   'background .12s, border-color .12s, color .12s',
+        fontFamily:   'inherit',
+        whiteSpace:   'nowrap',
+      }}
+      onMouseEnter={e => { if (!disabled && !accent) { e.currentTarget.style.borderColor = 'var(--border-strong)'; e.currentTarget.style.color = 'var(--text-primary)' }}}
+      onMouseLeave={e => { if (!accent) { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.color = 'var(--text-secondary)' }}}
+    >
+      {children}
+    </button>
+  )
+}
+
+// ── Main Component ────────────────────────────────────────────────────────────
+function ReportViewer({ report, feedback, status, error, topic, runId, ragSessionId }) {
+  const navigate   = useNavigate()
+  const [copied,   setCopied]  = useState(false)
+  const [activeTab, setTab]    = useState('report')
+
+  const hasReport   = report.trim().length > 0
   const hasFeedback = feedback.trim().length > 0
+  const isStreaming = status === 'running' || status === 'generating_report'
+
+  const wordCount = useMemo(() =>
+    report.split(/\s+/).filter(Boolean).length
+  , [report])
+
   const exportContent = useMemo(() => {
     if (!hasFeedback) return report
-    return `${report.trim()}\n\n---\n\n## Critic Review\n\n${feedback.trim()}\n`
-  }, [feedback, hasFeedback, report])
-  const wordCount = useMemo(() => report.split(/\s /).filter(Boolean).length, [report])
-  const feedbackWordCount = useMemo(() => feedback.split(/\s /).filter(Boolean).length, [feedback])
+    return `${report.trim()}\n\n---\n\n## AI Critique\n\n${feedback.trim()}\n`
+  }, [report, feedback, hasFeedback])
 
   const copyReport = useCallback(async () => {
     if (!hasReport) return
     try {
       await navigator.clipboard.writeText(exportContent)
       setCopied(true)
-      window.setTimeout(() => setCopied(false), 1800)
-    } catch {
-      setCopied(false)
-    }
+      setTimeout(() => setCopied(false), 2000)
+    } catch { /* clipboard blocked */ }
   }, [exportContent, hasReport])
 
-  const downloadReport = useCallback(async () => {
-    if (!runId) {
-      // Fallback: client-side Blob download if no runId yet (streaming)
-      const blob = new Blob([report], { type: 'text/markdown' })
-      const url  = URL.createObjectURL(blob)
-      const a   = document.createElement('a')
-      a.href = url; a.download = 'research-report.md'; a.click()
-      URL.revokeObjectURL(url)
-      return
-    }
-    // Use backend export endpoint — includes both report + feedback
-    const token = localStorage.getItem('researchos_token')
-    const res   = await fetch(`/api/history/${runId}/export`, {
-      headers: { Authorization: `Bearer ${token}` },
-    })
-    if (!res.ok) return
-    const blob = await res.blob()
-    const cd   = res.headers.get('Content-Disposition') ?? ''
-    const fnMatch = cd.match(/filename="([^"]+)"/)
+  const downloadReport = useCallback(() => {
+    if (!hasReport) return
+    const filename = topic
+      ? `${topic.slice(0, 50).replace(/[^\w\s-]/g, '').trim()}.md`
+      : 'research-report.md'
+    const blob = new Blob([exportContent], { type: 'text/markdown' })
     const url  = URL.createObjectURL(blob)
-    const a   = document.createElement('a')
-    a.href = url; a.download = fnMatch?.[1] ?? 'research-report.md'; a.click()
+    const a    = document.createElement('a')
+    a.href = url; a.download = filename; a.click()
     URL.revokeObjectURL(url)
-  }, [runId, report])
+  }, [exportContent, hasReport, topic])
 
   return (
-    <section className="rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
-      <div className="flex flex-col gap-3 border-b border-slate-200 px-5 py-4 dark:border-slate-800 sm:flex-row sm:items-center sm:justify-between">
+    <div style={{
+      background:   'var(--bg-card)',
+      border:       '1px solid var(--border)',
+      borderRadius: 14,
+      overflow:     'hidden',
+      display:      'flex',
+      flexDirection:'column',
+    }}>
+
+      {/* ── Header ── */}
+      <div style={{
+        padding:      '0.875rem 1.125rem',
+        borderBottom: '1px solid var(--border)',
+        background:   'var(--bg-base)',
+        display:      'flex',
+        alignItems:   'center',
+        justifyContent: 'space-between',
+        gap:          12,
+        flexWrap:     'wrap',
+        flexShrink:   0,
+      }}>
         <div>
-          <h2 className="text-xl font-semibold text-slate-950 dark:text-white">Research Result</h2>
-          <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{statusLabel(status, hasReport, hasFeedback)}</p>
+          <h2 style={{
+            fontFamily:    'var(--font-display)',
+            fontSize:      '1rem',
+            fontWeight:    700,
+            color:         'var(--text-primary)',
+            letterSpacing: '-0.02em',
+            margin:        0,
+          }}>
+            Research Report
+          </h2>
+          <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: '3px 0 0' }}>
+            {statusLabel(status, hasReport, hasFeedback)}
+          </p>
         </div>
-        <div className="flex gap-2">
-          <button
-            type="button"
-            onClick={copyReport}
-            disabled={!hasReport}
-            className="rounded-xl border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800 dark:focus:ring-offset-slate-950"
-          >
-            {copied ? 'Copied' : 'Copy'}
-          </button>
-          <button
-            type="button"
-            onClick={downloadReport}
-            disabled={!hasReport}
-            className="rounded-xl bg-slate-950 px-3 py-2 text-sm font-semibold text-white transition hover:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:bg-slate-300 dark:bg-white dark:text-slate-950 dark:hover:bg-slate-200 dark:focus:ring-offset-slate-950 dark:disabled:bg-slate-700 dark:disabled:text-slate-400"
-          >
-            Download
-          </button>
 
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          {/* Score badge */}
+          {hasFeedback && <ScoreBadge feedback={feedback} />}
 
-          {/* NEW: Chat with this report button — only shows when ragSessionId is ready */}
+          {/* Word count */}
+          {wordCount > 0 && (
+            <span style={{ fontSize: 11, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)' }}>
+              {wordCount.toLocaleString()} words
+            </span>
+          )}
+
+          {/* Toolbar */}
+          <ToolbarBtn onClick={copyReport} disabled={!hasReport}>
+            {copied ? '✓ Copied' : '📋 Copy'}
+          </ToolbarBtn>
+          <ToolbarBtn onClick={downloadReport} disabled={!hasReport}>
+            ⬇ Download
+          </ToolbarBtn>
+
+          {/* Chat with report button */}
           {ragSessionId && (
-            <button
-              type="button"
+            <ToolbarBtn
+              accent
               onClick={() => navigate(`/pdf-chat?session=${ragSessionId}`)}
-              style={{
-                display: 'inline-flex', alignItems: 'center', gap: 6,
-                padding: '6px 14px', borderRadius: 12,
-                background: 'rgba(99,102,241,0.12)',
-                border: '1px solid rgba(99,102,241,0.35)',
-                color: '#818cf8', fontSize: 13, fontWeight: 600,
-                cursor: 'pointer', whiteSpace: 'nowrap',
-              }}
             >
-              💬 Chat with this report
-            </button>
+              💬 Chat
+            </ToolbarBtn>
           )}
         </div>
       </div>
 
-      <div className="max-h-[700px] min-h-[420px] overflow-y-auto p-5">
-        {error && !hasReport ? (
-          <StateMessage title="Report unavailable" message={error} tone="error" />
-        ) : hasReport ? (
-          <div className="space-y-8">
-            <article>
-              <div className="mb-5 flex items-center justify-between border-b border-slate-200 pb-4 dark:border-slate-800">
-                <div>
-                  <h3 className="text-base font-semibold text-slate-950 dark:text-white">Final Report</h3>
-                  <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">Writer Agent output rendered as Markdown.</p>
-                </div>
-                <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-700 dark:bg-slate-800 dark:text-slate-200">
-                  {wordCount.toLocaleString()} words
-                </span>
-              </div>
-              <div className="report-content">
-                <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                  {report}
-                </ReactMarkdown>
-              </div>
-            </article>
+      {/* ── Tabs (Report / AI Critique) ── */}
+      {hasFeedback && (
+        <div style={{
+          display:      'flex',
+          gap:          2,
+          padding:      '0.5rem 1rem',
+          borderBottom: '1px solid var(--border)',
+          background:   'var(--bg-base)',
+          flexShrink:   0,
+        }}>
+          {['report', 'critique'].map(tab => (
+            <button
+              key={tab}
+              onClick={() => setTab(tab)}
+              style={{
+                padding:      '4px 12px',
+                borderRadius: 99,
+                fontSize:     12,
+                fontWeight:   600,
+                border:       'none',
+                cursor:       'pointer',
+                background:   activeTab === tab ? 'var(--accent-dim)' : 'transparent',
+                color:        activeTab === tab ? 'var(--accent)' : 'var(--text-muted)',
+                transition:   'background .12s, color .12s',
+                fontFamily:   'inherit',
+              }}
+            >
+              {tab === 'report' ? '📄 Report' : '🔍 AI Critique'}
+            </button>
+          ))}
+        </div>
+      )}
 
-            <section className="border-t border-indigo-200 pt-6 dark:border-indigo-900" aria-labelledby="critic-review-title">
-              <div className="mb-4 flex flex-col gap-1 border-b border-indigo-200 pb-4 dark:border-indigo-900 sm:flex-row sm:items-end sm:justify-between">
-                <div>
-                  <h3 id="critic-review-title" className="text-base font-semibold text-slate-950 dark:text-white">Critic Review</h3>
-                  <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">
-                    Quality feedback, score, and improvement notes from the Critic Agent.
-                  </p>
-                </div>
-                <span className="text-xs font-semibold text-indigo-700 dark:text-indigo-300">
-                  {hasFeedback ? `${feedbackWordCount.toLocaleString()} words` : 'Waiting for critique'}
-                </span>
-              </div>
+      {/* ── Content ── */}
+      <div style={{
+        flex:      1,
+        overflowY: 'auto',
+        padding:   '1.5rem',
+      }}>
 
-              {hasFeedback ? (
-                <div className="report-content">
-                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                    {feedback}
-                  </ReactMarkdown>
-                </div>
-              ) : (
-                <p className="text-sm leading-6 text-slate-600 dark:text-slate-300">
-                  The critique will appear here as soon as the Critic Agent completes.
-                </p>
-              )}
-            </section>
+        {/* Empty state */}
+        {!hasReport && !isStreaming && (
+          <div style={{
+            display:        'flex',
+            flexDirection:  'column',
+            alignItems:     'center',
+            justifyContent: 'center',
+            padding:        '4rem 2rem',
+            gap:            '0.75rem',
+            textAlign:      'center',
+            color:          'var(--text-faint)',
+          }}>
+            <div style={{ fontSize: '2.5rem' }}>🔬</div>
+            <div style={{
+              fontFamily:    'var(--font-display)',
+              fontSize:      '1.1rem',
+              fontWeight:    600,
+              color:         'var(--text-secondary)',
+              letterSpacing: '-0.02em',
+            }}>
+              No report yet
+            </div>
+            <p style={{ fontSize: 13.5, color: 'var(--text-muted)', maxWidth: 320, lineHeight: 1.65, margin: 0 }}>
+              Enter a topic above and click Run to start the AI research pipeline.
+            </p>
           </div>
-        ) : (
-          <StateMessage title={emptyTitle(status)} message={emptyMessage(status)} />
+        )}
+
+        {/* Report content */}
+        {(hasReport || isStreaming) && activeTab === 'report' && (
+          <div className="report-content">
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>
+              {report || ''}
+            </ReactMarkdown>
+            {/* Streaming cursor */}
+            {isStreaming && (
+              <span style={{
+                display:          'inline-block',
+                width:            2,
+                height:           '1.1em',
+                background:       'var(--accent)',
+                borderRadius:     1,
+                marginLeft:       3,
+                verticalAlign:    'text-bottom',
+                animation:        'blink 1s step-end infinite',
+              }} />
+            )}
+          </div>
+        )}
+
+        {/* AI Critique tab */}
+        {hasFeedback && activeTab === 'critique' && (
+          <div>
+            <div style={{
+              padding:      '0.75rem 1rem',
+              background:   'var(--accent-dim)',
+              border:       '1px solid var(--accent-border)',
+              borderRadius: 10,
+              marginBottom: '1rem',
+            }}>
+              <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.07em', color: 'var(--accent)', marginBottom: 4 }}>
+                AI Quality Review
+              </div>
+              <p style={{ fontSize: 12.5, color: 'var(--text-muted)', margin: 0, lineHeight: 1.6 }}>
+                An independent AI agent reviewed this report for accuracy, depth, and completeness.
+              </p>
+            </div>
+            <div className="report-content">
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>{feedback}</ReactMarkdown>
+            </div>
+          </div>
         )}
       </div>
 
-      <div className="flex flex-col gap-2 border-t border-slate-200 px-5 py-3 text-xs text-slate-500 dark:border-slate-800 dark:text-slate-400 sm:flex-row sm:items-center sm:justify-between">
-        <span>{hasReport ? `${wordCount.toLocaleString()} report words` : 'No report content yet'}</span>
-        {hasFeedback && <span>Critique included in copy and download</span>}
-      </div>
-    </section>
-  )
-}
-
-function StateMessage({ title, message, tone = 'default' }) {
-  const isError = tone === 'error'
-  return (
-    <div className={`flex min-h-[360px] flex-col items-center justify-center rounded-xl border border-dashed px-6 text-center ${isError ? 'border-rose-300 bg-rose-50 text-rose-700 dark:border-rose-900 dark:bg-rose-950/30 dark:text-rose-300' : 'border-slate-300 bg-slate-50 text-slate-600 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300'}`}>
-      <h3 className="text-base font-semibold">{title}</h3>
-      <p className="mt-2 max-w-md text-sm leading-6">{message}</p>
+      {/* Streaming cursor CSS */}
+      <style>{`
+        @keyframes blink {
+          0%, 100% { opacity: 1; }
+          50%       { opacity: 0; }
+        }
+      `}</style>
     </div>
   )
-}
-
-function statusLabel(status, hasReport, hasFeedback) {
-  if (hasReport && hasFeedback && status === 'completed') return 'Report Ready with Critic Review'
-  if (hasReport && status === 'completed') return 'Report Ready'
-  if (hasReport) return 'Generating Report'
-  if (status === 'loading') return 'Loading'
-  if (status === 'running') return 'Pipeline Running'
-  if (status === 'generating_report') return 'Generating Report'
-  if (status === 'failed') return 'Failed'
-  return 'Ready'
-}
-
-function emptyTitle(status) {
-  if (status === 'loading') return 'Starting pipeline'
-  if (status === 'running') return 'Pipeline running'
-  if (status === 'generating_report') return 'Generating report'
-  return 'Report will appear here'
-}
-
-function emptyMessage(status) {
-  if (status === 'idle') return 'Start research to generate a polished Markdown report and critic review.'
-  if (status === 'generating_report') return 'The Writer Agent is composing the report. Content will appear as soon as it is available.'
-  return 'The dashboard will keep this area stable while agents work.'
-}
-
-function slugify(value) {
-  return value.toLowerCase().replace(/[^a-z0-9] /g, '-').replace(/(^-|-$)/g, '') || 'orchestrai-report'
 }
 
 export default memo(ReportViewer)

@@ -17,15 +17,15 @@ export function TrackedTopicsSidebar({ onSelectTopic }) {
   const handleRemove = async (e, id) => {
     e.stopPropagation()  // don't trigger the row click
     setRemoving(id)
-    await newsApi.untrack(id).catch(() => {})
+    await newsApi.untrackTopic(id).catch(() => {})
     setTopics(prev => prev.filter(t => t.id !== id))
     setRemoving(null)
   }
 
   return (
     <aside style={{
-      background: 'rgba(255,255,255,0.02)',
-      border: '1px solid rgba(255,255,255,0.07)',
+      background: 'var(--bg-card)',
+      border: '1px solid var(--border)',
       borderRadius: 14, padding: '1rem',
       minWidth: 0,
     }}>
@@ -50,7 +50,7 @@ export function TrackedTopicsSidebar({ onSelectTopic }) {
           style={{
             display: 'flex', alignItems: 'center', gap: 8,
             padding: '7px 0', cursor: 'pointer',
-            borderBottom: '1px solid rgba(255,255,255,0.04)',
+            borderBottom: '1px solid var(--border)',
           }}
         >
           <span style={{ fontSize: 14, flexShrink: 0 }}>📰</span>

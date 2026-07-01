@@ -24,7 +24,7 @@ import { Skeleton, SkeletonText, SkeletonTitle } from '../Skeleton'
 function SkeletonCardShell({ children, style = {} }) {
   return (
     <div style={{
-      border:        '0.5px solid var(--color-border-tertiary, #e0ddd5)',
+      border:        '0.5px solid var(--border)',
       borderRadius:  '12px',
       padding:       '16px',
       display:       'flex',
@@ -72,7 +72,7 @@ function HeadlinesCardSkeleton() {
           gap:          '10px',
           alignItems:   'flex-start',
           paddingBottom:'10px',
-          borderBottom: i < 3 ? '0.5px solid var(--color-border-tertiary, #e0ddd5)' : 'none',
+          borderBottom: i < 3 ? '0.5px solid var(--border)' : 'none',
         }}>
           {/* Number */}
           <Skeleton width={20} height={20} radius={4} style={{ flexShrink: 0 }} />
@@ -121,7 +121,7 @@ function StatsCardSkeleton() {
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
         {Array.from({ length: 4 }).map((_, i) => (
           <div key={i} style={{
-            background:   'var(--color-background-secondary, #f9f9f7)',
+            background:   'var(--bg-base)',
             borderRadius: '8px',
             padding:      '10px',
             display:      'flex',

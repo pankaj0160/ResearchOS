@@ -42,8 +42,8 @@ export function WorkspaceProvider({ children }) {
     if (!user) { setWorkspaces([]); setActiveWorkspace(null); return }
     setLoading(true)
     try {
-      const data = await workspaceApi.getAll()
-      const list = data?.workspaces ?? []
+      const res  = await workspaceApi.getAll()
+      const list = res?.data?.workspaces ?? []
       setWorkspaces(list)
 
       // Restore last active workspace from localStorage
@@ -57,7 +57,9 @@ export function WorkspaceProvider({ children }) {
     } finally {
       setLoading(false)
     }
-  }, [user])
+  // user?.id — not whole user object — prevents refetch on every user object re-creation
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id])
 
   useEffect(() => { fetchWorkspaces() }, [fetchWorkspaces])
 

@@ -27,8 +27,55 @@ export const ragApi = {
   },
 
   /** Poll this until status becomes "ready" or "error" */
+  /** Get basic session status (ready / processing / error) */
   getStatus: (sessionId) =>
     apiClient.get(`/api/rag/status/${sessionId}`),
+
+  /**
+   * Poll /api/rag/progress/{id} until processing is complete.
+   * Calls onProgress(pct, stage) on every poll tick.
+   * Resolves with the final session object when status becomes 'ready'.
+   *
+   * This uses our new Week 2 progress endpoint that returns fine-grained
+   * percentage info: { pct: 45, stage: "Embedding chunks 40-50 of 87..." }
+   */
+  waitUntilReady: async (sessionId, onProgress) => {
+    const MAX_POLLS   = 180   // 3 minutes max (180 × 1s)
+    const POLL_MS     = 1000  // check every 1 second
+
+    for (let i = 0; i < MAX_POLLS; i++) {
+      await new Promise(r => setTimeout(r, POLL_MS))
+
+      try {
+        // First try the fine-grained progress endpoint (Week 2)
+        const progRes = await apiClient.get(`/api/rag/progress/${sessionId}`)
+        const prog    = progRes.data || {}
+        onProgress?.(prog.pct || 0, prog.stage || 'Processing...')
+
+        if (prog.done && !prog.error) {
+          // Done — fetch full session metadata and return it
+          const statusRes = await apiClient.get(`/api/rag/status/${sessionId}`)
+          return statusRes.data
+        }
+        if (prog.error) {
+          throw new Error(prog.error)
+        }
+      } catch (progressErr) {
+        // Progress endpoint not available — fall back to status polling
+        try {
+          const res  = await apiClient.get(`/api/rag/status/${sessionId}`)
+          const data = res.data || {}
+          const pct  = data.status === 'ready' ? 100 : Math.min(30 + i * 2, 90)
+          onProgress?.(pct, data.status === 'ready' ? 'Ready!' : 'Processing...')
+          if (data.status === 'ready') return data
+          if (data.status === 'error') throw new Error(data.error_msg || 'Processing failed')
+        } catch (statusErr) {
+          if (i > 10) throw statusErr   // give up after 10 consecutive failures
+        }
+      }
+    }
+    throw new Error('PDF processing timed out after 3 minutes. Please try a smaller PDF.')
+  },
 
   /** Get all PDF sessions for the logged-in user */
   getSessions: () =>

@@ -62,15 +62,15 @@ class ValidationErrorDetail(BaseModel):
     message: str = Field(..., description="What was wrong — e.g. 'value is not a valid email'")
     type:    str = Field("", description="Pydantic error type code — e.g. 'value_error.email'")
 
-    class Config:
-        # Shows example values in /docs
-        json_schema_extra = {
+    model_config = {
+        "json_schema_extra": {
             "example": {
                 "field":   "body → email",
                 "message": "value is not a valid email address",
                 "type":    "value_error.email",
             }
         }
+    }
 
 
 # ── Main error response model ──────────────────────────────────────────────────
@@ -124,67 +124,19 @@ class ErrorResponse(BaseModel):
         )
     )
 
-    class Config:
-        json_schema_extra = {
-            "examples": {
-                "not_found": {
-                    "summary": "404 Not Found",
-                    "value": {
-                        "error":       True,
-                        "message":     "Run not found",
-                        "code":        "NOT_FOUND",
-                        "status_code": 404,
-                        "details":     None,
-                    }
-                },
-                "unauthorized": {
-                    "summary": "401 Unauthorized",
-                    "value": {
-                        "error":       True,
-                        "message":     "Session expired — please log in again",
-                        "code":        "UNAUTHORIZED",
-                        "status_code": 401,
-                        "details":     None,
-                    }
-                },
-                "validation_error": {
-                    "summary": "422 Validation Error",
-                    "value": {
-                        "error":       True,
-                        "message":     "Invalid request: value is not a valid email address",
-                        "code":        "VALIDATION_ERROR",
-                        "status_code": 422,
-                        "details": [
-                            {
-                                "field":   "body → email",
-                                "message": "value is not a valid email address",
-                                "type":    "value_error.email",
-                            }
-                        ],
-                    }
-                },
-                "rate_limited": {
-                    "summary": "429 Rate Limited",
-                    "value": {
-                        "error":       True,
-                        "message":     "Too many requests — please wait 60 seconds",
-                        "code":        "RATE_LIMITED",
-                        "status_code": 429,
-                        "details":     None,
-                    }
-                },
-                "server_error": {
-                    "summary": "500 Internal Server Error",
-                    "value": {
-                        "error":       True,
-                        "message":     "Something went wrong on our end. Please try again.",
-                        "code":        "INTERNAL_ERROR",
-                        "status_code": 500,
-                        "details":     None,
-                    }
-                },
-            }
+    model_config = {
+        "json_schema_extra": {
+            "examples": [
+                {
+                    "error":       True,
+                    "message":     "Run not found",
+                    "code":        "NOT_FOUND",
+                    "status_code": 404,
+                    "details":     None,
+                }
+            ]
         }
+    }
 
 
 # ── Shortcut: standard error responses dict ───────────────────────────────────
