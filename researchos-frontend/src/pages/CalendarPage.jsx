@@ -14,6 +14,10 @@
 import { useState, useEffect, useMemo, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { apiClient } from '../services/apiClient'
+import { calendarApi } from '../services/calendarApi'
+import { useWorkspace } from '../context/WorkspaceContext'
+import { useToast } from '../hooks/useToast'
+import { EventModal } from '../components/Calendar/EventModal'
 
 const DAYS   = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 const MONTHS = ['January','February','March','April','May','June',
@@ -27,6 +31,10 @@ const TYPE_CONFIG = {
   news_search:       { color: '#F59E0B',        icon: '📰', label: 'News',      nav: p => `/news?topic=${encodeURIComponent(p.topic||'')}` },
   news_summarize:    { color: '#F59E0B',        icon: '📊', label: 'News',      nav: p => `/news?topic=${encodeURIComponent(p.topic||'')}` },
   workspace_created: { color: '#10B981',        icon: '📁', label: 'Workspace', nav: () => '/workspace' },
+  // User-created events (from the new calendar_events backend). Color is
+  // per-event (the user picks it in EventModal) — this entry is only the
+  // fallback icon/label used before the per-event color is applied.
+  calendar_event:    { color: '#3B82F6',        icon: '🗓️', label: 'Event',     nav: () => null },
 }
 
 function toDateKey(ts) {
@@ -144,32 +152,81 @@ function MonthStats({ byDate, year, month }) {
 export default function CalendarPage() {
   const navigate = useNavigate()
   const now      = new Date()
+  const { activeWorkspace } = useWorkspace()
 
   const [year,     setYear]     = useState(now.getFullYear())
   const [month,    setMonth]    = useState(now.getMonth())
-  const [events,   setEvents]   = useState([])
+  const [events,   setEvents]   = useState([])          // activity_events (automatic log)
+  const [calEvents, setCalEvents] = useState([])         // calendar_events (user-created)
   const [loading,  setLoading]  = useState(true)
   const [selected, setSelected] = useState(null)
 
-  // Load all activity events (up to 500)
+  // Modal state for creating/editing a real calendar event
+  const [modalOpen,     setModalOpen]     = useState(false)
+  const [editingEvent,  setEditingEvent]  = useState(null)   // null = creating new
+  const [modalDateKey,  setModalDateKey]  = useState(null)   // prefill date when creating from the day panel
+
+  const { toast } = useToast()
+
+  // Load activity events, scoped to the active workspace when one is selected.
+  // NOTE: this used to always fail — the backend capped `limit` at 50, this
+  // page requested 500, every request 422'd, and the failure was silently
+  // swallowed by .catch(() => {}), so the calendar always rendered empty
+  // regardless of how much real activity existed. Fixed on the backend
+  // (raised the ceiling) — kept here at 500 so a full month+ of activity
+  // renders in one request.
   useEffect(() => {
-    apiClient.get('/api/activity?limit=500')
+    setLoading(true)
+    const wsParam = activeWorkspace?.id != null ? `&workspace_id=${activeWorkspace.id}` : ''
+    apiClient.get(`/api/activity?limit=500${wsParam}`)
       .then(res => setEvents(res.data?.events || []))
       .catch(() => {})
       .finally(() => setLoading(false))
-  }, [])
+  }, [activeWorkspace?.id])
 
-  // Group events by date key "YYYY-MM-DD"
+  // Load real calendar events (deadlines, reminders, meetings) for the visible
+  // month — padded a week on each side so events that land in the leading/
+  // trailing days of the grid (from adjacent months) still show up correctly.
+  // Refetches whenever the visible month or active workspace changes.
+  const reloadCalendarEvents = useCallback(() => {
+    const rangeStart = Math.floor(new Date(year, month, -7).getTime() / 1000)
+    const rangeEnd   = Math.floor(new Date(year, month + 1, 7).getTime() / 1000)
+    return calendarApi
+      .list({ start: rangeStart, end: rangeEnd, workspaceId: activeWorkspace?.id ?? null })
+      .then(res => setCalEvents(res.data?.events || []))
+      .catch(() => {})
+  }, [year, month, activeWorkspace?.id])
+
+  useEffect(() => { reloadCalendarEvents() }, [reloadCalendarEvents])
+
+  // Group events by date key "YYYY-MM-DD" — merges the automatic activity
+  // log with user-created calendar events into one normalized shape so the
+  // grid and detail panel can render both without special-casing everywhere.
   const byDate = useMemo(() => {
     const map = {}
+    const push = (key, item) => {
+      if (!map[key]) map[key] = []
+      map[key].push(item)
+    }
+
     for (const ev of events) {
       if (!ev.created_at) continue
-      const key = toDateKey(ev.created_at)
-      if (!map[key]) map[key] = []
-      map[key].push(ev)
+      push(toDateKey(ev.created_at), { ...ev, _source: 'activity' })
+    }
+    for (const ev of calEvents) {
+      if (!ev.start_time) continue
+      push(toDateKey(ev.start_time), {
+        id: `cal-${ev.id}`,
+        event_type: 'calendar_event',
+        created_at: ev.start_time,
+        payload: { title: ev.title, description: ev.description },
+        color: ev.color,
+        _source: 'calendar_event',
+        _raw: ev,
+      })
     }
     return map
-  }, [events])
+  }, [events, calEvents])
 
   // Build the calendar grid cells
   const { cells } = useMemo(() => {
@@ -200,18 +257,64 @@ export default function CalendarPage() {
     k.startsWith(`${year}-${String(month+1).padStart(2,'0')}`)
   ).length
 
+  // ── Real calendar event actions ────────────────────────────────────────────
+  const openCreateModal = useCallback((dateKey = null) => {
+    setEditingEvent(null)
+    setModalDateKey(dateKey)
+    setModalOpen(true)
+  }, [])
+
+  const openEditModal = useCallback((rawEvent) => {
+    setEditingEvent(rawEvent)
+    setModalDateKey(null)
+    setModalOpen(true)
+  }, [])
+
+  const handleSaveEvent = useCallback(async (fields) => {
+    if (editingEvent) {
+      const res = await calendarApi.update(editingEvent.id, fields)
+      if (!res.ok) throw new Error(res.error || 'Failed to save event')
+      toast.success('Event updated')
+    } else {
+      const res = await calendarApi.create({ ...fields, workspaceId: activeWorkspace?.id ?? null })
+      if (!res.ok) throw new Error(res.error || 'Failed to create event')
+      toast.success('Event created')
+    }
+    await reloadCalendarEvents()
+  }, [editingEvent, activeWorkspace?.id, reloadCalendarEvents, toast])
+
+  const handleDeleteEvent = useCallback(async (eventId) => {
+    const res = await calendarApi.delete(eventId)
+    if (!res.ok) throw new Error(res.error || 'Failed to delete event')
+    toast.success('Event deleted')
+    await reloadCalendarEvents()
+  }, [reloadCalendarEvents, toast])
+
   return (
     <div className="page-container page-fade">
 
       {/* Page header */}
-      <div className="page-header">
-        <h1 className="page-title">
-          <span className="page-title-icon">📅</span>
-          Activity Calendar
-        </h1>
-        <p className="page-subtitle">
-          Every research run, PDF upload, and news search mapped to the day it happened.
-        </p>
+      <div className="page-header" style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+        <div>
+          <h1 className="page-title">
+            <span className="page-title-icon">📅</span>
+            Calendar
+          </h1>
+          <p className="page-subtitle">
+            Your deadlines and events, plus every research run, PDF upload, and news search — all in one place.
+          </p>
+        </div>
+        <button
+          onClick={() => openCreateModal(null)}
+          style={{
+            display: 'flex', alignItems: 'center', gap: 6,
+            padding: '0.6rem 1.1rem', borderRadius: 8, border: 'none',
+            background: 'var(--accent)', color: '#fff', fontSize: 13, fontWeight: 700,
+            cursor: 'pointer', whiteSpace: 'nowrap',
+          }}
+        >
+          + New Event
+        </button>
       </div>
 
       <div className="cal-layout">
@@ -265,13 +368,18 @@ export default function CalendarPage() {
                 const isToday = key === todayKey
                 const isSel   = key === selected
                 const hasEvs  = dayEvs.length > 0
-                // Get up to 4 unique event type colors for dots
-                const dots    = [...new Set(dayEvs.map(e => e.event_type))].slice(0, 4)
+                // Get up to 4 unique dot colors — calendar_event items carry their
+                // own per-event color (set by the user in EventModal); everything
+                // else falls back to its TYPE_CONFIG color.
+                const dots    = [...new Set(dayEvs.map(e =>
+                  e._source === 'calendar_event' ? e.color : (TYPE_CONFIG[e.event_type]?.color || 'var(--text-faint)')
+                ))].slice(0, 4)
 
                 return (
                   <div
                     key={key}
-                    onClick={() => hasEvs && setSelected(isSel ? null : key)}
+                    onClick={() => hasEvs ? setSelected(isSel ? null : key) : openCreateModal(key)}
+                    title={hasEvs ? undefined : 'Add an event on this day'}
                     style={{
                       aspectRatio: '1',
                       borderRadius: 10,
@@ -283,13 +391,13 @@ export default function CalendarPage() {
                         ? '1px solid var(--accent-border)'
                         : isToday ? '1px solid var(--border-strong)'
                         : '1px solid var(--border)',
-                      cursor: hasEvs ? 'pointer' : 'default',
+                      cursor: 'pointer',
                       display: 'flex', flexDirection: 'column',
                       alignItems: 'flex-start',
                       transition: 'background .1s, border-color .1s',
-                      opacity: hasEvs ? 1 : 0.4,
+                      opacity: hasEvs ? 1 : 0.55,
                     }}
-                    onMouseEnter={e => { if (hasEvs && !isSel) e.currentTarget.style.background = 'var(--bg-card-hover)' }}
+                    onMouseEnter={e => { if (!isSel) e.currentTarget.style.background = hasEvs ? 'var(--bg-card-hover)' : 'var(--bg-card)' }}
                     onMouseLeave={e => { if (!isSel) e.currentTarget.style.background = hasEvs ? 'var(--bg-card)' : 'transparent' }}
                   >
                     <span style={{
@@ -305,10 +413,10 @@ export default function CalendarPage() {
                     </span>
                     {dots.length > 0 && (
                       <div style={{ display: 'flex', gap: 2, marginTop: 'auto', flexWrap: 'wrap' }}>
-                        {dots.map(type => (
+                        {dots.map(dotColor => (
                           <div
-                            key={type}
-                            style={{ width: 5, height: 5, borderRadius: '50%', background: TYPE_CONFIG[type]?.color || 'var(--text-faint)' }}
+                            key={dotColor}
+                            style={{ width: 5, height: 5, borderRadius: '50%', background: dotColor }}
                           />
                         ))}
                         {dayEvs.length > 4 && (
@@ -334,23 +442,31 @@ export default function CalendarPage() {
                     {selectedEvents.length} event{selectedEvents.length !== 1 ? 's' : ''}
                   </div>
                 </div>
-                <button
-                  onClick={() => setSelected(null)}
-                  style={{ width: 28, height: 28, background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 7, cursor: 'pointer', color: 'var(--text-faint)', fontSize: 14, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-                >✕</button>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button
+                    onClick={() => openCreateModal(selected)}
+                    title="Add an event on this day"
+                    style={{ width: 28, height: 28, background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 7, cursor: 'pointer', color: 'var(--accent)', fontSize: 15, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                  >+</button>
+                  <button
+                    onClick={() => setSelected(null)}
+                    style={{ width: 28, height: 28, background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 7, cursor: 'pointer', color: 'var(--text-faint)', fontSize: 14, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                  >✕</button>
+                </div>
               </div>
 
               <div style={{ maxHeight: 320, overflowY: 'auto' }}>
                 {selectedEvents.map((ev, i) => {
+                  const isCalEvent = ev._source === 'calendar_event'
                   const cfg     = TYPE_CONFIG[ev.event_type] || { icon: '⚡', label: ev.event_type, color: 'var(--text-muted)', nav: () => '/' }
                   const payload = typeof ev.payload === 'string' ? JSON.parse(ev.payload || '{}') : (ev.payload || {})
                   const title   = payload.topic || payload.name || payload.filename || payload.title || ev.event_type
-                  const navUrl  = cfg.nav(payload)
+                  const dotColor = isCalEvent ? ev.color : cfg.color
 
                   return (
                     <div
                       key={ev.id || i}
-                      onClick={() => navigate(navUrl)}
+                      onClick={() => isCalEvent ? openEditModal(ev._raw) : navigate(cfg.nav(payload))}
                       style={{
                         display: 'flex', alignItems: 'center', gap: 10,
                         padding: '0.7rem 1rem',
@@ -361,18 +477,22 @@ export default function CalendarPage() {
                       onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
                     >
                       <div style={{ width: 28, height: 28, background: 'var(--bg-base)', border: '1px solid var(--border)', borderRadius: 7, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, flexShrink: 0 }}>
-                        {cfg.icon}
+                        {isCalEvent ? cfg.icon : cfg.icon}
                       </div>
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 1 }}>
-                          <span style={{ fontSize: 11, fontWeight: 700, color: cfg.color, textTransform: 'uppercase', letterSpacing: '0.06em' }}>{cfg.label}</span>
-                          <span style={{ fontSize: 10, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)', marginLeft: 'auto' }}>{formatTime(ev.created_at)}</span>
+                          <span style={{ fontSize: 11, fontWeight: 700, color: dotColor, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+                            {isCalEvent ? 'Event' : cfg.label}
+                          </span>
+                          <span style={{ fontSize: 10, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)', marginLeft: 'auto' }}>
+                            {isCalEvent && ev._raw.all_day ? 'All day' : formatTime(ev.created_at)}
+                          </span>
                         </div>
                         <div style={{ fontSize: 13, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                           {title}
                         </div>
                       </div>
-                      <span style={{ fontSize: 12, color: 'var(--text-faint)' }}>→</span>
+                      <span style={{ fontSize: 12, color: 'var(--text-faint)' }}>{isCalEvent ? '✎' : '→'}</span>
                     </div>
                   )
                 })}
@@ -395,6 +515,15 @@ export default function CalendarPage() {
         </div>
 
       </div>
+
+      <EventModal
+        open={modalOpen}
+        onClose={() => setModalOpen(false)}
+        event={editingEvent}
+        defaultDateKey={modalDateKey}
+        onSave={handleSaveEvent}
+        onDelete={editingEvent ? handleDeleteEvent : undefined}
+      />
     </div>
   )
 }

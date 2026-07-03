@@ -22,6 +22,8 @@ Tables:
   activity_events     — user action log (powers activity feed)
   news_tracked_topics — topics the user follows in News page
   rag_sessions        — PDF upload metadata and processing status
+  calendar_events     — user-created calendar events (deadlines, reminders, meetings)
+  refresh_tokens      — hashed, revocable refresh tokens (session management)
 """
 
 from __future__ import annotations
@@ -213,6 +215,40 @@ _PG_SCHEMA = [
         created_at   REAL    NOT NULL
     )
     """,
+
+    # ── Calendar events (user-created, distinct from activity_events) ─────────
+    """
+    CREATE TABLE IF NOT EXISTS calendar_events (
+        id           SERIAL  PRIMARY KEY,
+        user_id      INTEGER NOT NULL REFERENCES users(id),
+        workspace_id INTEGER,
+        title        TEXT    NOT NULL,
+        description  TEXT    NOT NULL DEFAULT '',
+        start_time   REAL    NOT NULL,
+        end_time     REAL,
+        all_day      INTEGER NOT NULL DEFAULT 0,
+        color        TEXT    NOT NULL DEFAULT '#3B82F6',
+        created_at   REAL    NOT NULL,
+        updated_at   REAL
+    )
+    """,
+
+    # ── Refresh tokens — opaque, revocable, rotated on each use ────────────────
+    # Stored as a SHA-256 hash, never the raw token — same principle as never
+    # storing raw passwords. The raw token only ever exists in transit and in
+    # the client's storage.
+    """
+    CREATE TABLE IF NOT EXISTS refresh_tokens (
+        id            SERIAL  PRIMARY KEY,
+        user_id       INTEGER NOT NULL REFERENCES users(id),
+        token_hash    TEXT    NOT NULL UNIQUE,
+        created_at    REAL    NOT NULL,
+        expires_at    REAL    NOT NULL,
+        revoked_at    REAL,
+        last_used_at  REAL,
+        user_agent    TEXT
+    )
+    """,
 ]
 
 # ALTER TABLE statements — safely add columns to existing databases.
@@ -320,6 +356,29 @@ CREATE TABLE IF NOT EXISTS rag_sessions (
     run_id       INTEGER,
     workspace_id INTEGER,
     created_at   REAL    NOT NULL
+);
+CREATE TABLE IF NOT EXISTS calendar_events (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id      INTEGER NOT NULL REFERENCES users(id),
+    workspace_id INTEGER,
+    title        TEXT    NOT NULL,
+    description  TEXT    NOT NULL DEFAULT '',
+    start_time   REAL    NOT NULL,
+    end_time     REAL,
+    all_day      INTEGER NOT NULL DEFAULT 0,
+    color        TEXT    NOT NULL DEFAULT '#3B82F6',
+    created_at   REAL    NOT NULL,
+    updated_at   REAL
+);
+CREATE TABLE IF NOT EXISTS refresh_tokens (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id       INTEGER NOT NULL REFERENCES users(id),
+    token_hash    TEXT    NOT NULL UNIQUE,
+    created_at    REAL    NOT NULL,
+    expires_at    REAL    NOT NULL,
+    revoked_at    REAL,
+    last_used_at  REAL,
+    user_agent    TEXT
 );
 """
 
@@ -536,57 +595,82 @@ async def save_run_async(
 # RESEARCH RUNS — Read
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def get_history(limit: int = 50, user_id: int | None = None) -> list[dict]:
-    """Return research runs as list of dicts. Sync fallback."""
+def get_history(
+    limit: int = 50,
+    user_id: int | None = None,
+    workspace_id: int | None = None,
+) -> list[dict]:
+    """
+    Return research runs as list of dicts. Sync fallback.
+
+    workspace_id semantics (applies to every reader touched in this patch):
+      - None → no workspace filter, return runs across ALL workspaces
+      - int  → only runs saved under that workspace_id
+    This mirrors how `workspace_id` is already written on INSERT (see
+    save_run/save_run_async) — we're just finally using it on read.
+    """
+    conditions: list[str] = []
+    params: list = []
+
+    if user_id is not None:
+        conditions.append("user_id = ?")
+        params.append(user_id)
+    if workspace_id is not None:
+        conditions.append("workspace_id = ?")
+        params.append(workspace_id)
+
+    where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+    params.append(limit)
+
     with _conn() as con:
         cur = con.cursor()
-        if user_id is not None:
-            cur.execute(
-                _q("""SELECT id, topic, score, word_count, source_count, created_at,
-                             substr(report, 1, 300) AS excerpt
-                      FROM runs WHERE user_id = ?
-                      ORDER BY created_at DESC LIMIT ?"""),
-                (user_id, limit),
-            )
-        else:
-            cur.execute(
-                _q("""SELECT id, topic, score, word_count, source_count, created_at,
-                             substr(report, 1, 300) AS excerpt
-                      FROM runs ORDER BY created_at DESC LIMIT ?"""),
-                (limit,),
-            )
+        cur.execute(
+            _q(f"""SELECT id, topic, score, word_count, source_count, created_at, workspace_id,
+                          substr(report, 1, 300) AS excerpt
+                   FROM runs {where}
+                   ORDER BY created_at DESC LIMIT ?"""),
+            tuple(params),
+        )
         return _fetchall(cur)
 
 
-async def get_history_async(limit: int = 50, user_id: int | None = None) -> list[dict]:
-    """Return research runs without blocking the event loop."""
+async def get_history_async(
+    limit: int = 50,
+    user_id: int | None = None,
+    workspace_id: int | None = None,
+) -> list[dict]:
+    """Return research runs without blocking the event loop. See get_history() for workspace_id semantics."""
     if not _async_pool:
-        return get_history(limit=limit, user_id=user_id)
+        return get_history(limit=limit, user_id=user_id, workspace_id=workspace_id)
+
+    conditions: list[str] = []
+    params: list = []
+    idx = 1
+
+    if user_id is not None:
+        conditions.append(f"user_id = ${idx}")
+        params.append(user_id)
+        idx += 1
+    if workspace_id is not None:
+        conditions.append(f"workspace_id = ${idx}")
+        params.append(workspace_id)
+        idx += 1
+
+    where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+    params.append(limit)
 
     async with _async_pool.acquire() as conn:
-        if user_id is not None:
-            rows = await conn.fetch(
-                """
-                SELECT id, topic, score, word_count, source_count, created_at,
-                       SUBSTRING(report, 1, 300) AS excerpt
-                FROM   runs
-                WHERE  user_id = $1
-                ORDER  BY created_at DESC
-                LIMIT  $2
-                """,
-                user_id, limit,
-            )
-        else:
-            rows = await conn.fetch(
-                """
-                SELECT id, topic, score, word_count, source_count, created_at,
-                       SUBSTRING(report, 1, 300) AS excerpt
-                FROM   runs
-                ORDER  BY created_at DESC
-                LIMIT  $1
-                """,
-                limit,
-            )
+        rows = await conn.fetch(
+            f"""
+            SELECT id, topic, score, word_count, source_count, created_at, workspace_id,
+                   SUBSTRING(report, 1, 300) AS excerpt
+            FROM   runs
+            {where}
+            ORDER  BY created_at DESC
+            LIMIT  ${idx}
+            """,
+            *params,
+        )
     return [dict(row) for row in rows]
 
 
@@ -853,6 +937,142 @@ def get_user_by_id(user_id: int) -> dict | None:
         return _fetchone(cur)
 
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# REFRESH TOKENS — session management for the access/refresh token pair.
+#
+# Only the SHA-256 hash of the token is ever stored (see auth.py:hash_refresh_token).
+# A row with revoked_at set is a dead token — auth_router checks that before
+# trusting it. Rotation (auth_router's /refresh route) revokes the old row
+# and inserts a new one in the same request, so a replayed old refresh token
+# is rejected even if it hasn't expired yet.
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def create_refresh_token(
+    user_id: int, token_hash: str, expires_at: float, user_agent: str | None = None,
+) -> int:
+    """Insert a new refresh token row (sync fallback). Returns its id."""
+    now = time.time()
+    with _conn() as con:
+        cur = con.cursor()
+        cur.execute(
+            _q(
+                "INSERT INTO refresh_tokens "
+                "(user_id, token_hash, created_at, expires_at, user_agent) "
+                "VALUES (?,?,?,?,?)"
+            ),
+            (user_id, token_hash, now, expires_at, user_agent),
+        )
+        if USE_POSTGRES:
+            cur.execute("SELECT lastval()")
+            return cur.fetchone()[0]
+        return cur.lastrowid
+
+
+async def create_refresh_token_async(
+    user_id: int, token_hash: str, expires_at: float, user_agent: str | None = None,
+) -> int:
+    """Async version of create_refresh_token()."""
+    if not _async_pool:
+        return create_refresh_token(user_id, token_hash, expires_at, user_agent)
+    now = time.time()
+    async with _async_pool.acquire() as conn:
+        rid = await conn.fetchval(
+            """
+            INSERT INTO refresh_tokens (user_id, token_hash, created_at, expires_at, user_agent)
+            VALUES ($1, $2, $3, $4, $5)
+            RETURNING id
+            """,
+            user_id, token_hash, now, expires_at, user_agent,
+        )
+    return rid
+
+
+def get_refresh_token(token_hash: str) -> dict | None:
+    """Look up a refresh token row by its hash (sync fallback)."""
+    with _conn() as con:
+        cur = con.cursor()
+        cur.execute(_q("SELECT * FROM refresh_tokens WHERE token_hash = ?"), (token_hash,))
+        return _fetchone(cur)
+
+
+async def get_refresh_token_async(token_hash: str) -> dict | None:
+    """Async version of get_refresh_token()."""
+    if not _async_pool:
+        return get_refresh_token(token_hash)
+    async with _async_pool.acquire() as conn:
+        row = await conn.fetchrow("SELECT * FROM refresh_tokens WHERE token_hash = $1", token_hash)
+    return dict(row) if row else None
+
+
+def revoke_refresh_token(token_hash: str) -> bool:
+    """Mark a single refresh token as revoked. Returns True if a row changed."""
+    with _conn() as con:
+        cur = con.cursor()
+        cur.execute(
+            _q("UPDATE refresh_tokens SET revoked_at = ? WHERE token_hash = ? AND revoked_at IS NULL"),
+            (time.time(), token_hash),
+        )
+        return cur.rowcount > 0
+
+
+async def revoke_refresh_token_async(token_hash: str) -> bool:
+    """Async version of revoke_refresh_token()."""
+    if not _async_pool:
+        return revoke_refresh_token(token_hash)
+    async with _async_pool.acquire() as conn:
+        result = await conn.execute(
+            "UPDATE refresh_tokens SET revoked_at = $1 WHERE token_hash = $2 AND revoked_at IS NULL",
+            time.time(), token_hash,
+        )
+    return result.split()[-1] != "0"
+
+
+def touch_refresh_token(token_hash: str) -> None:
+    """Update last_used_at — called every time a refresh token is presented, valid or not."""
+    with _conn() as con:
+        cur = con.cursor()
+        cur.execute(
+            _q("UPDATE refresh_tokens SET last_used_at = ? WHERE token_hash = ?"),
+            (time.time(), token_hash),
+        )
+
+
+async def touch_refresh_token_async(token_hash: str) -> None:
+    """Async version of touch_refresh_token()."""
+    if not _async_pool:
+        touch_refresh_token(token_hash)
+        return
+    async with _async_pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE refresh_tokens SET last_used_at = $1 WHERE token_hash = $2",
+            time.time(), token_hash,
+        )
+
+
+def revoke_all_refresh_tokens_for_user(user_id: int) -> int:
+    """Revoke every active refresh token for a user (logout-all-devices, password reset). Returns count revoked."""
+    with _conn() as con:
+        cur = con.cursor()
+        cur.execute(
+            _q("UPDATE refresh_tokens SET revoked_at = ? WHERE user_id = ? AND revoked_at IS NULL"),
+            (time.time(), user_id),
+        )
+        return cur.rowcount
+
+
+async def revoke_all_refresh_tokens_for_user_async(user_id: int) -> int:
+    """Async version of revoke_all_refresh_tokens_for_user()."""
+    if not _async_pool:
+        return revoke_all_refresh_tokens_for_user(user_id)
+    async with _async_pool.acquire() as conn:
+        result = await conn.execute(
+            "UPDATE refresh_tokens SET revoked_at = $1 WHERE user_id = $2 AND revoked_at IS NULL",
+            time.time(), user_id,
+        )
+    # asyncpg execute() returns a string like "UPDATE 3" — the row count
+    return int(result.split()[-1])
+
+
 def get_user_full(user_id: int) -> dict | None:
     """Return user with profile fields (city, default_topic)."""
     with _conn() as con:
@@ -1049,17 +1269,27 @@ async def log_activity_async(
         print(f"[Activity] Failed to log '{event_type}' for user {user_id}: {exc}")
 
 
-def get_activity(user_id: int, limit: int = 20) -> list[dict]:
-    """Return recent activity events for a user with payload parsed from JSON."""
+def get_activity(user_id: int, limit: int = 20, workspace_id: int | None = None) -> list[dict]:
+    """Return recent activity events for a user with payload parsed from JSON.
+
+    workspace_id: None = all workspaces, int = only events logged under that workspace.
+    """
+    where = "WHERE user_id = ?"
+    params: list = [user_id]
+    if workspace_id is not None:
+        where += " AND workspace_id = ?"
+        params.append(workspace_id)
+    params.append(limit)
+
     with _conn() as con:
         cur = con.cursor()
         cur.execute(
             _q(
-                "SELECT id, event_type, payload, workspace_id, created_at "
-                "FROM activity_events WHERE user_id = ? "
-                "ORDER BY created_at DESC LIMIT ?"
+                f"SELECT id, event_type, payload, workspace_id, created_at "
+                f"FROM activity_events {where} "
+                f"ORDER BY created_at DESC LIMIT ?"
             ),
-            (user_id, limit),
+            tuple(params),
         )
         rows = _fetchall(cur)
     for row in rows:
@@ -1071,20 +1301,32 @@ def get_activity(user_id: int, limit: int = 20) -> list[dict]:
     return rows
 
 
-async def get_activity_async(user_id: int, limit: int = 20) -> list[dict]:
-    """Return recent activity events (async) with payload parsed from JSON."""
+async def get_activity_async(user_id: int, limit: int = 20, workspace_id: int | None = None) -> list[dict]:
+    """Return recent activity events (async) with payload parsed from JSON.
+
+    workspace_id: None = all workspaces, int = only events logged under that workspace.
+    """
     if not _async_pool:
-        return get_activity(user_id, limit)
+        return get_activity(user_id, limit, workspace_id=workspace_id)
+
+    where = "WHERE user_id = $1"
+    params: list = [user_id]
+    if workspace_id is not None:
+        where += " AND workspace_id = $2"
+        params.append(workspace_id)
+    params.append(limit)
+    limit_placeholder = f"${len(params)}"
+
     async with _async_pool.acquire() as conn:
         rows = await conn.fetch(
-            """
+            f"""
             SELECT id, event_type, payload, workspace_id, created_at
             FROM   activity_events
-            WHERE  user_id = $1
+            {where}
             ORDER  BY created_at DESC
-            LIMIT  $2
+            LIMIT  {limit_placeholder}
             """,
-            user_id, limit,
+            *params,
         )
     result = [dict(row) for row in rows]
     for row in result:
@@ -1162,25 +1404,41 @@ async def track_news_topic_async(
     return row["id"] if row else 0
 
 
-def get_tracked_topics(user_id: int) -> list[dict]:
-    """Return all tracked news topics for a user."""
+def get_tracked_topics(user_id: int, workspace_id: int | None = None) -> list[dict]:
+    """Return tracked news topics for a user.
+
+    workspace_id: None = all workspaces, int = only topics tracked under that workspace.
+    """
+    where = "WHERE user_id = ?"
+    params: list = [user_id]
+    if workspace_id is not None:
+        where += " AND workspace_id = ?"
+        params.append(workspace_id)
+
     with _conn() as con:
         cur = con.cursor()
         cur.execute(
-            _q("SELECT * FROM news_tracked_topics WHERE user_id = ? ORDER BY created_at DESC"),
-            (user_id,),
+            _q(f"SELECT * FROM news_tracked_topics {where} ORDER BY created_at DESC"),
+            tuple(params),
         )
         return _fetchall(cur)
 
 
-async def get_tracked_topics_async(user_id: int) -> list[dict]:
-    """Return all tracked news topics for a user (async)."""
+async def get_tracked_topics_async(user_id: int, workspace_id: int | None = None) -> list[dict]:
+    """Return tracked news topics for a user (async). See get_tracked_topics() for workspace_id semantics."""
     if not _async_pool:
-        return get_tracked_topics(user_id)
+        return get_tracked_topics(user_id, workspace_id=workspace_id)
+
+    where = "WHERE user_id = $1"
+    params: list = [user_id]
+    if workspace_id is not None:
+        where += " AND workspace_id = $2"
+        params.append(workspace_id)
+
     async with _async_pool.acquire() as conn:
         rows = await conn.fetch(
-            "SELECT * FROM news_tracked_topics WHERE user_id = $1 ORDER BY created_at DESC",
-            user_id,
+            f"SELECT * FROM news_tracked_topics {where} ORDER BY created_at DESC",
+            *params,
         )
     return [dict(row) for row in rows]
 
@@ -1304,15 +1562,58 @@ def get_all_rag_sessions() -> list[dict]:
         return _fetchall(cur)
 
 
-def get_rag_sessions_for_user(user_id: int) -> list[dict]:
-    """Return RAG sessions for a specific user."""
+def get_rag_sessions_for_user(user_id: int, workspace_id: int | None = None) -> list[dict]:
+    """Return RAG (PDF Chat) sessions for a specific user, persisted in the DB.
+
+    workspace_id: None = all workspaces, int = only sessions created under that workspace.
+
+    NOTE: this is a *sync* function that opens a blocking DB connection. It is
+    safe to call from sync code paths, but calling it directly inside an async
+    request handler blocks the event loop for every other concurrent request.
+    Use get_rag_sessions_for_user_async() from async route handlers instead.
+    """
+    where = "WHERE user_id = ?"
+    params: list = [user_id]
+    if workspace_id is not None:
+        where += " AND workspace_id = ?"
+        params.append(workspace_id)
+
     with _conn() as con:
         cur = con.cursor()
         cur.execute(
-            _q("SELECT * FROM rag_sessions WHERE user_id = ? ORDER BY created_at DESC"),
-            (user_id,),
+            _q(f"SELECT * FROM rag_sessions {where} ORDER BY created_at DESC"),
+            tuple(params),
         )
         return _fetchall(cur)
+
+
+async def get_rag_sessions_for_user_async(user_id: int, workspace_id: int | None = None) -> list[dict]:
+    """Async, non-blocking version of get_rag_sessions_for_user().
+
+    This is the DB-backed source of truth for PDF Chat sessions. Previously
+    the /api/rag/sessions endpoint only read from the in-memory _rag_sessions
+    dict, which is wiped on every server restart/redeploy — meaning a user's
+    entire PDF Chat session list would silently disappear whenever the
+    backend process restarted (very common on Render's free tier, which
+    spins dynos down on idle). This function lets that endpoint read the
+    durable rag_sessions table instead, with the in-memory dict layered on
+    top only for sessions still mid-upload (see routers/rag_router.py).
+    """
+    if not _async_pool:
+        return get_rag_sessions_for_user(user_id, workspace_id=workspace_id)
+
+    where = "WHERE user_id = $1"
+    params: list = [user_id]
+    if workspace_id is not None:
+        where += " AND workspace_id = $2"
+        params.append(workspace_id)
+
+    async with _async_pool.acquire() as conn:
+        rows = await conn.fetch(
+            f"SELECT * FROM rag_sessions {where} ORDER BY created_at DESC",
+            *params,
+        )
+    return [dict(row) for row in rows]
 
 
 def delete_rag_session_db(session_id: str) -> bool:
@@ -1321,6 +1622,234 @@ def delete_rag_session_db(session_id: str) -> bool:
         cur = con.cursor()
         cur.execute(_q("DELETE FROM rag_sessions WHERE id = ?"), (session_id,))
         return cur.rowcount > 0
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# CALENDAR EVENTS — user-created events (deadlines, reminders, meetings).
+#
+# Distinct from `activity_events`: activity_events is an automatic, read-only
+# log written by other features (research runs, uploads, searches). This
+# table holds events the USER explicitly creates — the thing a real calendar
+# needs and what was missing from CalendarPage.jsx (which previously only
+# rendered activity_events, so it was an activity log wearing a calendar UI,
+# not an actual calendar you can put a deadline or meeting on).
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def create_calendar_event(
+    user_id: int,
+    title: str,
+    start_time: float,
+    end_time: float | None = None,
+    description: str = "",
+    all_day: bool = False,
+    color: str = "#3B82F6",
+    workspace_id: int | None = None,
+) -> int:
+    """Create a calendar event (sync fallback). Returns its id."""
+    now = time.time()
+    with _conn() as con:
+        cur = con.cursor()
+        cur.execute(
+            _q(
+                "INSERT INTO calendar_events "
+                "(user_id, workspace_id, title, description, start_time, end_time, "
+                "all_day, color, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)"
+            ),
+            (
+                user_id, workspace_id, title.strip(), description.strip(),
+                start_time, end_time, int(all_day), color, now, now,
+            ),
+        )
+        if USE_POSTGRES:
+            cur.execute("SELECT lastval()")
+            return cur.fetchone()[0]
+        return cur.lastrowid
+
+
+async def create_calendar_event_async(
+    user_id: int,
+    title: str,
+    start_time: float,
+    end_time: float | None = None,
+    description: str = "",
+    all_day: bool = False,
+    color: str = "#3B82F6",
+    workspace_id: int | None = None,
+) -> int:
+    """Create a calendar event without blocking the event loop. Returns its id."""
+    if not _async_pool:
+        return create_calendar_event(
+            user_id, title, start_time, end_time, description, all_day, color, workspace_id,
+        )
+    now = time.time()
+    async with _async_pool.acquire() as conn:
+        eid = await conn.fetchval(
+            """
+            INSERT INTO calendar_events
+                (user_id, workspace_id, title, description, start_time, end_time,
+                 all_day, color, created_at, updated_at)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+            RETURNING id
+            """,
+            user_id, workspace_id, title.strip(), description.strip(),
+            start_time, end_time, all_day, color, now, now,
+        )
+    return eid
+
+
+def get_calendar_events(
+    user_id: int,
+    start_range: float | None = None,
+    end_range: float | None = None,
+    workspace_id: int | None = None,
+) -> list[dict]:
+    """Return calendar events for a user, optionally scoped to a time range and/or workspace.
+
+    start_range/end_range: unix timestamps — returns events that OVERLAP the
+    range (an event starting before end_range and ending — or starting, if
+    no end_time — after start_range). None on either side means unbounded.
+    workspace_id: None = all workspaces, int = only that workspace's events.
+    """
+    # Overlap test: an event [start_time, COALESCE(end_time, start_time)]
+    # overlaps the requested range [start_range, end_range] when the event
+    # starts on/before end_range AND its effective end is on/after start_range.
+    # Written as two independent, single-placeholder conditions so the
+    # placeholder count always matches the param count exactly.
+    where  = ["user_id = ?"]
+    params: list = [user_id]
+
+    if start_range is not None:
+        where.append("COALESCE(end_time, start_time) >= ?")
+        params.append(start_range)
+    if end_range is not None:
+        where.append("start_time <= ?")
+        params.append(end_range)
+    if workspace_id is not None:
+        where.append("workspace_id = ?")
+        params.append(workspace_id)
+
+    clause = " AND ".join(where)
+    with _conn() as con:
+        cur = con.cursor()
+        cur.execute(
+            _q(f"SELECT * FROM calendar_events WHERE {clause} ORDER BY start_time ASC"),
+            tuple(params),
+        )
+        return _fetchall(cur)
+
+
+async def get_calendar_events_async(
+    user_id: int,
+    start_range: float | None = None,
+    end_range: float | None = None,
+    workspace_id: int | None = None,
+) -> list[dict]:
+    """Async version of get_calendar_events()."""
+    if not _async_pool:
+        return get_calendar_events(user_id, start_range, end_range, workspace_id=workspace_id)
+
+    where  = ["user_id = $1"]
+    params: list = [user_id]
+
+    if start_range is not None:
+        params.append(start_range)
+        where.append(f"COALESCE(end_time, start_time) >= ${len(params)}")
+    if end_range is not None:
+        params.append(end_range)
+        where.append(f"start_time <= ${len(params)}")
+    if workspace_id is not None:
+        params.append(workspace_id)
+        where.append(f"workspace_id = ${len(params)}")
+
+    clause = " AND ".join(where)
+    async with _async_pool.acquire() as conn:
+        rows = await conn.fetch(
+            f"SELECT * FROM calendar_events WHERE {clause} ORDER BY start_time ASC",
+            *params,
+        )
+    return [dict(row) for row in rows]
+
+
+def get_calendar_event(event_id: int) -> dict | None:
+    """Return a single calendar event by id (used for ownership checks)."""
+    with _conn() as con:
+        cur = con.cursor()
+        cur.execute(_q("SELECT * FROM calendar_events WHERE id = ?"), (event_id,))
+        return _fetchone(cur)
+
+
+async def get_calendar_event_async(event_id: int) -> dict | None:
+    """Async version of get_calendar_event()."""
+    if not _async_pool:
+        return get_calendar_event(event_id)
+    async with _async_pool.acquire() as conn:
+        row = await conn.fetchrow("SELECT * FROM calendar_events WHERE id = $1", event_id)
+    return dict(row) if row else None
+
+
+def update_calendar_event(event_id: int, **kwargs) -> bool:
+    """Update a calendar event. Only updates provided fields. Returns True if a row changed."""
+    allowed = {"title", "description", "start_time", "end_time", "all_day", "color", "workspace_id"}
+    fields = {k: v for k, v in kwargs.items() if k in allowed}
+    if not fields:
+        return False
+    if "all_day" in fields:
+        fields["all_day"] = int(bool(fields["all_day"]))
+    fields["updated_at"] = time.time()
+    set_clause = ", ".join(f"{k} = ?" for k in fields)
+    with _conn() as con:
+        cur = con.cursor()
+        cur.execute(
+            _q(f"UPDATE calendar_events SET {set_clause} WHERE id = ?"),
+            (*fields.values(), event_id),
+        )
+        return cur.rowcount > 0
+
+
+async def update_calendar_event_async(event_id: int, **kwargs) -> bool:
+    """Async version of update_calendar_event()."""
+    if not _async_pool:
+        return update_calendar_event(event_id, **kwargs)
+
+    allowed = {"title", "description", "start_time", "end_time", "all_day", "color", "workspace_id"}
+    fields = {k: v for k, v in kwargs.items() if k in allowed}
+    if not fields:
+        return False
+    if "all_day" in fields:
+        fields["all_day"] = bool(fields["all_day"])
+    fields["updated_at"] = time.time()
+
+    set_parts = []
+    params: list = []
+    for k, v in fields.items():
+        params.append(v)
+        set_parts.append(f"{k} = ${len(params)}")
+    params.append(event_id)
+    set_clause = ", ".join(set_parts)
+
+    async with _async_pool.acquire() as conn:
+        result = await conn.execute(
+            f"UPDATE calendar_events SET {set_clause} WHERE id = ${len(params)}",
+            *params,
+        )
+    return result.split()[-1] != "0"
+
+
+def delete_calendar_event(event_id: int) -> bool:
+    """Delete a calendar event. Returns True if deleted."""
+    with _conn() as con:
+        cur = con.cursor()
+        cur.execute(_q("DELETE FROM calendar_events WHERE id = ?"), (event_id,))
+        return cur.rowcount > 0
+
+
+async def delete_calendar_event_async(event_id: int) -> bool:
+    """Async version of delete_calendar_event()."""
+    if not _async_pool:
+        return delete_calendar_event(event_id)
+    async with _async_pool.acquire() as conn:
+        result = await conn.execute("DELETE FROM calendar_events WHERE id = $1", event_id)
+    return result.split()[-1] != "0"
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

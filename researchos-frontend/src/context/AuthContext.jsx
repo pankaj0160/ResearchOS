@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useState } from 'react'
 import { apiClient } from '../services/apiClient.js'
-import { getToken, setToken, clearToken } from '../services/tokenStorage.js'
+import { authApi } from '../services/authApi.js'
+import { getToken, setToken, getRefreshToken, setRefreshToken, clearToken } from '../services/tokenStorage.js'
 
 const AuthContext = createContext(null)
 
@@ -27,14 +28,32 @@ export function AuthProvider({ children }) {
       .finally(() => setLoading(false))
   }, [])
 
-  const login = useCallback((token, userData) => {
+  const login = useCallback((token, userData, refreshToken) => {
     setToken(token)
+    if (refreshToken) setRefreshToken(refreshToken)
     setUser(userData)
   }, [])
 
   const logout = useCallback(() => {
+    // Best-effort revoke on the backend — fire-and-forget so logout still
+    // feels instant even on a slow/offline connection. Local state is
+    // cleared immediately regardless of whether the revoke call succeeds;
+    // worst case the server-side refresh token row just expires naturally
+    // in 30 days instead of being revoked right now.
+    const currentRefreshToken = getRefreshToken()
+    if (currentRefreshToken) {
+      authApi.logout(currentRefreshToken).catch(() => {})
+    }
     clearToken()
     setUser(null)
+  }, [])
+
+  /** Revoke every session for this account (all devices) and log out locally too */
+  const logoutAll = useCallback(async () => {
+    const result = await authApi.logoutAll()
+    clearToken()
+    setUser(null)
+    return result
   }, [])
 
   /** Update city and/or default_topic */
@@ -53,6 +72,7 @@ export function AuthProvider({ children }) {
         loading,
         login,
         logout,
+        logoutAll,
         getToken,
         updateProfile,
       }}

@@ -19,6 +19,7 @@ Route map:
   /api/workspaces/*        → workspace_router
   /api/activity            → workspace_router
   /api/search              → workspace_router
+  /api/calendar/*          → calendar_router
   /api/rate-limit/status   → main.py (inline)
   /api/health              → main.py (inline)
 """
@@ -44,6 +45,7 @@ from routers.research_router  import router as research_router
 from routers.rag_router       import router as rag_router, _rag_sessions
 from routers.news_router      import router as news_router
 from routers.workspace_router import router as workspace_router
+from routers.calendar_router  import router as calendar_router
 from routers.error_handlers   import register_error_handlers
 
 # ── Internal modules ──────────────────────────────────────────────────────────
@@ -317,6 +319,7 @@ app.include_router(workspace_router)   # MUST be before research_router — /api
 app.include_router(research_router)
 app.include_router(rag_router)
 app.include_router(news_router)
+app.include_router(calendar_router)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

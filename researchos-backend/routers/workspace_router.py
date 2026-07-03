@@ -30,7 +30,7 @@ from database import (
     get_workspace_async,
     get_activity_async,
     get_tracked_topics_async,
-    get_rag_sessions_for_user,
+    get_rag_sessions_for_user_async,
 )
 
 # _rag_sessions is imported lazily inside route handlers to avoid
@@ -150,7 +150,15 @@ async def delete_workspace(wid: int, current_user: CurrentUser):
 @router.get("/api/activity")
 async def get_activity(
     current_user: CurrentUser,
-    limit: int = Query(default=20, ge=1, le=50),
+    limit: int = Query(
+        default=20, ge=1, le=1000,
+        description="Higher ceiling than the default dashboard feed needs, "
+                     "because CalendarPage requests up to 500 events to render a full month view.",
+    ),
+    workspace_id: int | None = Query(
+        default=None,
+        description="Filter activity to a single workspace. Omit to see activity across all workspaces.",
+    ),
 ):
     """
     Return recent user activity across ALL features.
@@ -162,7 +170,7 @@ async def get_activity(
       'news_search'       — searched for news
       'workspace_created' — created a workspace
     """
-    events = await get_activity_async(current_user["id"], limit=limit)
+    events = await get_activity_async(current_user["id"], limit=limit, workspace_id=workspace_id)
     return {"events": events, "count": len(events)}
 
 
@@ -175,6 +183,10 @@ async def unified_history(
     current_user: CurrentUser,
     limit:   int = Query(default=50, ge=1, le=200),
     feature: str = Query(default="all"),
+    workspace_id: int | None = Query(
+        default=None,
+        description="Filter the merged timeline to a single workspace. Omit for all workspaces.",
+    ),
 ):
     """
     Merged timeline of all user activity across every ResearchOS feature.
@@ -184,16 +196,22 @@ async def unified_history(
     ?feature=research   → only research runs
     ?feature=pdf        → only PDF sessions
     ?feature=news       → only news topics
+    ?workspace_id=N     → only items belonging to workspace N (all workspaces if omitted)
 
-    Uses asyncio.gather() to fetch research + news simultaneously.
-    This is 2x faster than fetching one after the other.
+    Uses asyncio.gather() to fetch research + PDF + news simultaneously.
+    This is faster than fetching one after another.
     """
     uid = current_user["id"]
 
-    # Fetch research + news in PARALLEL
-    runs, tracked_news = await asyncio.gather(
-        get_history_async(limit=limit, user_id=uid),
-        get_tracked_topics_async(uid),
+    # Fetch research + PDF sessions + news in PARALLEL.
+    # NOTE: get_rag_sessions_for_user_async() is used here instead of the sync
+    # get_rag_sessions_for_user() — the sync version opens a blocking DB
+    # connection, which would freeze the entire event loop (and every other
+    # concurrent request) for the duration of the query.
+    runs, db_rag, tracked_news = await asyncio.gather(
+        get_history_async(limit=limit, user_id=uid, workspace_id=workspace_id),
+        database.get_rag_sessions_for_user_async(uid, workspace_id=workspace_id),
+        get_tracked_topics_async(uid, workspace_id=workspace_id),
     )
 
     # Research runs
@@ -211,12 +229,14 @@ async def unified_history(
         for r in runs
     ]
 
-    # RAG sessions — merge in-memory + DB (so restarts don't wipe history)
-    db_rag = get_rag_sessions_for_user(uid)
+    # RAG sessions — merge in-memory (live status) over DB (durable source of truth)
     combined_rag: dict[str, dict] = {s["id"]: s for s in db_rag}
     for sid, s in _get_rag_sessions().items():
-        if s.get("user_id") == uid:
-            combined_rag[sid] = {**s, "id": sid}
+        if s.get("user_id") != uid:
+            continue
+        if workspace_id is not None and s.get("workspace_id") != workspace_id:
+            continue
+        combined_rag[sid] = {**combined_rag.get(sid, {}), **s, "id": sid}
 
     rag_items = [
         {
@@ -268,7 +288,13 @@ async def unified_history(
 # =============================================================================
 
 @router.get("/api/history/recent")
-async def recent_per_feature(current_user: CurrentUser):
+async def recent_per_feature(
+    current_user: CurrentUser,
+    workspace_id: int | None = Query(
+        default=None,
+        description="Filter recent items to a single workspace. Omit for all workspaces.",
+    ),
+):
     """
     Return the last 5 items from EACH feature in one fast parallel call.
     Powers the 'Recent' sidebar shown on Research, PDF Chat, and News pages.
@@ -282,13 +308,25 @@ async def recent_per_feature(current_user: CurrentUser):
     """
     uid = current_user["id"]
 
-    # Fetch research + news in parallel
-    runs, tracked_news = await asyncio.gather(
-        get_history_async(limit=5, user_id=uid),
-        get_tracked_topics_async(uid),
+    # Fetch research + PDF sessions + news in parallel.
+    # PDF sessions now come from the DB (durable), not just the in-memory
+    # store — the in-memory-only version returned an empty list for every
+    # user right after a server restart, since that dict starts empty.
+    runs, db_rag, tracked_news = await asyncio.gather(
+        get_history_async(limit=5, user_id=uid, workspace_id=workspace_id),
+        database.get_rag_sessions_for_user_async(uid, workspace_id=workspace_id),
+        get_tracked_topics_async(uid, workspace_id=workspace_id),
     )
 
-    # PDF sessions: from in-memory store (no DB call needed — already in memory)
+    # Overlay live in-memory status (covers sessions still processing)
+    combined_rag: dict[str, dict] = {s["id"]: s for s in db_rag}
+    for sid, s in _get_rag_sessions().items():
+        if s.get("user_id") != uid:
+            continue
+        if workspace_id is not None and s.get("workspace_id") != workspace_id:
+            continue
+        combined_rag[sid] = {**combined_rag.get(sid, {}), **s, "id": sid}
+
     pdf_sessions = sorted(
         [
             {
@@ -298,8 +336,8 @@ async def recent_per_feature(current_user: CurrentUser):
                 "created_at": s.get("created_at"),
                 "page_count": s.get("page_count", 0),
             }
-            for sid, s in _get_rag_sessions().items()
-            if s.get("user_id") == uid and s.get("status") == "ready"
+            for sid, s in combined_rag.items()
+            if s.get("status") == "ready"
         ],
         key=lambda x: x.get("created_at") or 0,
         reverse=True,
@@ -349,9 +387,15 @@ async def global_search(
     uid = current_user["id"]
     kw  = q.lower().strip()
 
-    # Fetch research + workspaces in parallel
-    all_runs, all_workspaces = await asyncio.gather(
+    # Fetch research + PDF sessions + news + workspaces in parallel.
+    # get_tracked_topics_async (not the sync get_tracked_topics) is used here
+    # because the sync version opens a blocking DB connection — calling it
+    # directly in an async handler freezes the event loop for every other
+    # concurrent request for the duration of the query.
+    all_runs, db_rag, all_tracked, all_workspaces = await asyncio.gather(
         get_history_async(limit=100, user_id=uid),
+        database.get_rag_sessions_for_user_async(uid),
+        get_tracked_topics_async(uid),
         get_workspaces_async(uid),
     )
 
@@ -368,7 +412,13 @@ async def global_search(
         if kw in r["topic"].lower()
     ][:6]
 
-    # PDF sessions — match on filename
+    # PDF sessions — DB (durable) overlaid with live in-memory status, so
+    # sessions remain searchable even right after a server restart
+    combined_rag: dict[str, dict] = {s["id"]: s for s in db_rag}
+    for sid, s in _get_rag_sessions().items():
+        if s.get("user_id") == uid:
+            combined_rag[sid] = {**combined_rag.get(sid, {}), **s, "id": sid}
+
     pdf_results = [
         {
             "type":     "pdf",
@@ -377,14 +427,12 @@ async def global_search(
             "subtitle": f"PDF · {s.get('page_count', 0)} pages",
             "url":      f"/pdf-chat?session={sid}",
         }
-        for sid, s in _get_rag_sessions().items()
-        if s.get("user_id") == uid
-        and s.get("status") == "ready"
+        for sid, s in combined_rag.items()
+        if s.get("status") == "ready"
         and kw in (s.get("filename") or "").lower()
     ][:6]
 
     # News topics — match on topic name
-    all_tracked  = database.get_tracked_topics(uid)
     news_results = [
         {
             "type":     "news",

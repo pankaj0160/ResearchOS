@@ -2,14 +2,32 @@
 auth.py — Authentication utilities for ResearchOS.
 
 Provides:
-  - Password hashing & verification (bcrypt via passlib)
-  - JWT creation & decoding (python-jose)
+  - Password hashing & verification (bcrypt)
+  - Access-token JWT creation & decoding (python-jose)
+  - Refresh-token generation & hashing (opaque, rotated, revocable)
   - FastAPI dependency: get_current_user
+
+TOKEN MODEL:
+  Access token  — short-lived (15 min) JWT, stateless, never revocable on its
+                  own. If stolen, it's only useful for 15 minutes.
+  Refresh token — long-lived (30 days) opaque random string. The RAW value is
+                  only ever sent to the client once (at login/refresh) and is
+                  never stored server-side — only its SHA-256 hash is, in the
+                  refresh_tokens table. This is what makes revocation possible:
+                  we can invalidate a specific device's session (logout) or
+                  every session (logout-all / password reset) by flipping a
+                  `revoked_at` flag, something a stateless JWT alone can't do.
+  Rotation      — every time a refresh token is used at POST /api/auth/refresh,
+                  it is revoked and a new one is issued. A leaked refresh token
+                  that gets replayed after the legitimate client already used
+                  it will be rejected (see routers/auth_router.py::refresh).
 """
 
 from __future__ import annotations
 
+import hashlib
 import os
+import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -24,7 +42,13 @@ import database
 
 SECRET_KEY: str = os.getenv("JWT_SECRET_KEY", "researchos-dev-secret-change-in-production")
 ALGORITHM: str = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 7  # 7 days
+
+# Access tokens are intentionally short-lived now that refresh tokens exist —
+# a stolen access token used to be valid for 7 days with no way to revoke it.
+# Now it's valid for 15 minutes, and the refresh token (which CAN be revoked)
+# is what keeps the user logged in beyond that.
+ACCESS_TOKEN_EXPIRE_MINUTES: int = 15
+REFRESH_TOKEN_EXPIRE_DAYS: int = 30
 
 # ── Password hashing ──────────────────────────────────────────────────────────
 
@@ -36,7 +60,7 @@ def hash_password(password: str) -> str:
 def verify_password(plain: str, hashed: str) -> bool:
     return bcrypt.checkpw(plain.encode("utf-8"), hashed.encode("utf-8"))
 
-# ── JWT ───────────────────────────────────────────────────────────────────────
+# ── Access token (JWT) ──────────────────────────────────────────────────────────
 
 def create_access_token(data: dict[str, Any]) -> str:
     """
@@ -57,6 +81,37 @@ def decode_token(token: str) -> dict | None:
         return jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
     except JWTError:
         return None
+
+
+# ── Refresh token (opaque, hashed at rest) ──────────────────────────────────────
+
+def generate_refresh_token() -> str:
+    """
+    Generate a new raw refresh token — 48 bytes of CSPRNG randomness,
+    URL-safe encoded. This is the value sent to the client. It is never
+    stored anywhere server-side; only its hash is (see hash_refresh_token).
+    """
+    return secrets.token_urlsafe(48)
+
+
+def hash_refresh_token(raw_token: str) -> str:
+    """
+    SHA-256 hash of a refresh token, for storage/lookup in the database.
+
+    Why SHA-256 and not bcrypt (unlike passwords): bcrypt's per-hash salt and
+    deliberate slowness exist to defend against offline brute-forcing of a
+    LOW-entropy human password. A refresh token is already a 48-byte CSPRNG
+    value — brute-forcing it is computationally infeasible regardless of hash
+    speed, so a fast, deterministic hash is both correct and necessary here
+    (we need to look it up by exact hash match, which a salted bcrypt hash
+    can't do without storing the salt separately and re-deriving per lookup).
+    """
+    return hashlib.sha256(raw_token.encode("utf-8")).hexdigest()
+
+
+def refresh_token_expiry_timestamp() -> float:
+    """Unix timestamp for when a freshly-issued refresh token should expire."""
+    return (datetime.now(timezone.utc) + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)).timestamp()
 
 
 # ── FastAPI dependency ────────────────────────────────────────────────────────

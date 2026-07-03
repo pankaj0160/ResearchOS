@@ -6,6 +6,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
+import { useWorkspace } from '../context/WorkspaceContext'
 import { apiClient } from '../services/apiClient'
 import { useDashboard } from '../hooks/useDashboard'
 import { WeatherCard }     from '../components/Dashboard/WeatherCard'
@@ -47,20 +48,27 @@ const EVENT_META = {
 
 // ── Quick stat card ───────────────────────────────────────────────────────────
 function StatCard({ icon, label, value, sub, color, onClick }) {
+  const accent = color || 'var(--accent)'
   return (
     <div
       onClick={onClick}
       style={{
+        position: 'relative', overflow: 'hidden',
         background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 12,
         padding: '1rem', cursor: onClick ? 'pointer' : 'default',
-        transition: 'border-color .15s, box-shadow .15s',
-        display: 'flex', flexDirection: 'column', gap: 4,
+        transition: 'border-color .15s, box-shadow .15s, transform .15s',
+        display: 'flex', flexDirection: 'column', gap: 6,
       }}
-      onMouseEnter={e => { if (onClick) { e.currentTarget.style.borderColor = 'var(--border-strong)'; e.currentTarget.style.boxShadow = 'var(--shadow)' } }}
-      onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.boxShadow = 'none' }}
+      onMouseEnter={e => { if (onClick) { e.currentTarget.style.borderColor = 'var(--border-strong)'; e.currentTarget.style.boxShadow = 'var(--shadow)'; e.currentTarget.style.transform = 'translateY(-1px)' } }}
+      onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.boxShadow = 'none'; e.currentTarget.style.transform = 'none' }}
     >
-      <div style={{ fontSize: '1.25rem', lineHeight: 1 }}>{icon}</div>
-      <div style={{ fontFamily: 'var(--font-display)', fontSize: '1.5rem', fontWeight: 800, color: color || 'var(--text-primary)', letterSpacing: '-0.03em', lineHeight: 1 }}>
+      {/* Colored top accent bar — quiet signal of what this card represents */}
+      <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 2.5, background: accent, opacity: 0.85 }} />
+
+      <div className="dash-icon-chip" style={{ background: `color-mix(in srgb, ${accent} 14%, transparent)` }}>
+        {icon}
+      </div>
+      <div style={{ fontFamily: 'var(--font-display)', fontSize: '1.5rem', fontWeight: 800, color: 'var(--text-primary)', letterSpacing: '-0.03em', lineHeight: 1, marginTop: 2 }}>
         {value}
       </div>
       <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)' }}>{label}</div>
@@ -156,7 +164,7 @@ function QuickActions() {
     { icon: '📋', label: 'History',       sub: 'Past research',        color: 'var(--text-muted)', path: '/history' },
   ]
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '0.75rem' }}>
+    <div className="dash-quick-actions-grid">
       {actions.map(a => (
         <button
           key={a.path}
@@ -170,8 +178,10 @@ function QuickActions() {
           onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--border-strong)'; e.currentTarget.style.transform = 'translateY(-1px)'; e.currentTarget.style.boxShadow = 'var(--shadow)' }}
           onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.transform = 'none'; e.currentTarget.style.boxShadow = 'none' }}
         >
-          <span style={{ fontSize: '1.25rem', lineHeight: 1 }}>{a.icon}</span>
-          <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--text-primary)' }}>{a.label}</span>
+          <div className="dash-icon-chip" style={{ background: `color-mix(in srgb, ${a.color} 14%, transparent)` }}>
+            {a.icon}
+          </div>
+          <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--text-primary)', marginTop: 2 }}>{a.label}</span>
           <span style={{ fontSize: 11, color: 'var(--text-faint)' }}>{a.sub}</span>
         </button>
       ))}
@@ -182,6 +192,7 @@ function QuickActions() {
 // ── Main Page ─────────────────────────────────────────────────────────────────
 export default function AIDashboardPage() {
   const { user } = useAuth()
+  const { activeWorkspace } = useWorkspace()
   const greet    = getGreeting()
   const now      = new Date()
 
@@ -200,12 +211,16 @@ export default function AIDashboardPage() {
     chatLoading, chatError, sendChat,
   } = useDashboard()
 
-  // Load activity + stats
+  // Load activity + stats — scoped to the active workspace when one is
+  // selected, otherwise shows activity across all of the user's workspaces.
+  // Re-runs whenever the user switches workspaces via the WorkspaceSwitcher.
   useEffect(() => {
     if (!user) return
+    setActLoading(true)
+    const wsParam = activeWorkspace?.id != null ? `&workspace_id=${activeWorkspace.id}` : ''
     Promise.all([
-      apiClient.get('/api/activity?limit=20'),
-      apiClient.get('/api/history/recent'),
+      apiClient.get(`/api/activity?limit=20${wsParam}`),
+      apiClient.get(`/api/history/recent${wsParam ? `?${wsParam.slice(1)}` : ''}`),
     ]).then(([actRes, recentRes]) => {
       setActivity(actRes.data?.events || [])
       const r = recentRes.data || {}
@@ -215,7 +230,7 @@ export default function AIDashboardPage() {
         news:     r.news?.length     || 0,
       })
     }).catch(() => {}).finally(() => setActLoading(false))
-  }, [user])
+  }, [user, activeWorkspace?.id])
 
   const initialLoading = weatherLoading && headlinesLoading && chatMessages.length === 0 && actLoading
   if (initialLoading) return <DashboardSkeleton />
@@ -223,9 +238,13 @@ export default function AIDashboardPage() {
   return (
     <div className="page-container page-fade">
 
-      {/* Greeting header */}
-      <div style={{ marginBottom: '1.75rem' }}>
-        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16 }}>
+      {/* Greeting hero — glow orbs + grid pattern, same visual language as the auth pages */}
+      <div className="dash-hero dash-stagger dash-stagger--1" style={{ marginBottom: '1.75rem' }}>
+        <div className="dash-hero-orb dash-hero-orb--accent" />
+        <div className="dash-hero-orb dash-hero-orb--gold" />
+        <div className="dash-hero-grid-pattern" />
+
+        <div className="dash-hero-content" style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap' }}>
           <div>
             <div style={{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.1em', color: 'var(--accent)', fontFamily: 'var(--font-mono)', marginBottom: 6 }}>
               {now.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}
@@ -242,19 +261,24 @@ export default function AIDashboardPage() {
       </div>
 
       {/* Quick actions */}
-      <div style={{ marginBottom: '1.5rem' }}>
+      <div className="dash-stagger dash-stagger--2" style={{ marginBottom: '1.5rem' }}>
         <QuickActions />
       </div>
 
       {/* Stats row */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '0.75rem', marginBottom: '1.5rem' }}>
+      <div className="dash-stagger dash-stagger--3 dash-stats-grid" style={{ marginBottom: '1.5rem' }}>
         <StatCard icon="🔬" label="Research runs"  value={stats.research} sub="recent sessions" color="var(--accent)" onClick={() => window.location.href='/history?tab=research'} />
         <StatCard icon="📄" label="PDF sessions"   value={stats.pdfs}     sub="documents indexed" color="#8B5CF6" onClick={() => window.location.href='/pdf-chat'} />
         <StatCard icon="📰" label="News topics"    value={stats.news}     sub="topics tracked" color="#F59E0B" onClick={() => window.location.href='/news'} />
       </div>
 
-      {/* Main grid */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '1rem', marginBottom: '1rem' }}>
+      {/* Main grid — Weather / Headlines / Travel Safety.
+          className was previously missing here entirely, so the matching
+          .dash-top-grid breakpoints in index.css (1100px, 700px) never
+          applied — this 3-column row stayed fixed-width all the way down
+          to phone sizes, squeezing each card to roughly a third of a
+          375px screen. */}
+      <div className="dash-top-grid dash-stagger dash-stagger--4" style={{ marginBottom: '1rem' }}>
         <WeatherCard
           weather={weather} loading={weatherLoading} error={weatherError}
           cityInput={weatherInput} setCityInput={setWeatherInput} onFetch={fetchWeather}
@@ -269,23 +293,18 @@ export default function AIDashboardPage() {
         />
       </div>
 
-      {/* Bottom row: Activity + Chat */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+      {/* Bottom row: Activity + Chat.
+          Same bug as above but worse — this had NO breakpoint at all
+          anywhere (not even a dead/unused one), so it stayed a fixed
+          1fr 1fr grid at every viewport width. Now uses .dash-bottom-grid,
+          which collapses to one column under 900px. */}
+      <div className="dash-bottom-grid">
         <ActivityFeedCard events={activity} loading={actLoading} />
         <DashboardChat
           messages={chatMessages} input={chatInput} setInput={setChatInput}
           loading={chatLoading} error={chatError} onSend={sendChat}
         />
       </div>
-
-      <style>{`
-        @media (max-width: 1100px) {
-          .dash-top-grid { grid-template-columns: 1fr 1fr !important; }
-        }
-        @media (max-width: 768px) {
-          .dash-top-grid { grid-template-columns: 1fr !important; }
-        }
-      `}</style>
     </div>
   )
 }

@@ -21,7 +21,7 @@ export default function LoginPage() {
     const result = await authApi.login(email, password)
 
     if (result.ok) {
-      login(result.data.token, result.data.user)
+      login(result.data.token, result.data.user, result.data.refresh_token)
       navigate('/dashboard', { replace: true })
     } else {
       setError(result.error || 'Login failed — please check your credentials')

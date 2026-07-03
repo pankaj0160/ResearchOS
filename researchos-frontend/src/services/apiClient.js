@@ -9,7 +9,10 @@
  * WHAT IT HANDLES AUTOMATICALLY (so no service file ever has to):
  *   ✓ Attaches Authorization header with JWT token
  *   ✓ Sets Content-Type: application/json on every request
- *   ✓ 401 Unauthorized  → clears token + redirects to /login
+ *   ✓ 401 Unauthorized  → silently refreshes the access token and retries
+ *                         the request ONCE; only clears session + redirects
+ *                         to /login if the refresh itself fails (refresh
+ *                         token expired/revoked — a real logout condition)
  *   ✓ 429 Too Many Requests → shows "slow down" toast warning
  *   ✓ 500+ Server Error → shows "something went wrong" toast
  *   ✓ Network offline   → shows "check your connection" toast
@@ -36,16 +39,26 @@
  *
  * TOKEN STORAGE:
  *   Token read/write/clear logic lives in ./tokenStorage.js — the single
- *   source of truth for the localStorage key. AuthContext.jsx imports the
- *   same module, so the key can never drift out of sync between the two
+ *   source of truth for the localStorage keys. AuthContext.jsx imports the
+ *   same module, so the keys can never drift out of sync between the two
  *   (this previously caused a silent bug where apiClient read a different
  *   key than AuthContext wrote to, making every authenticated request
  *   except /api/auth/me fail with 401).
+ *
+ * ACCESS/REFRESH TOKEN FLOW:
+ *   The backend now issues a short-lived (15 min) access token plus a
+ *   long-lived (30 day) refresh token. When a request 401s because the
+ *   access token expired, this file automatically calls POST /api/auth/refresh
+ *   with the stored refresh token, stores the new pair, and retries the
+ *   original request — the caller never sees the 401 at all. Multiple
+ *   requests that 401 around the same time share a single in-flight refresh
+ *   call (see `refreshPromise` below) instead of each firing their own
+ *   refresh and racing to rotate the token out from under each other.
  * ─────────────────────────────────────────────────────────────────────────────
  */
 
 import { API_BASE_URL } from './config.js'
-import { getToken, clearToken } from './tokenStorage.js'
+import { getToken, setToken, getRefreshToken, setRefreshToken, clearToken } from './tokenStorage.js'
 
 
 // ── Toast integration ─────────────────────────────────────────────────────────
@@ -87,6 +100,66 @@ function errorResult(error, status, code = 'UNKNOWN_ERROR') {
 }
 
 
+// ── Token refresh coordination ─────────────────────────────────────────────────
+// Routes that must NEVER trigger a refresh-and-retry — refreshing on a 401
+// from these would either recurse (refresh itself 401ing) or make no sense
+// (login/register aren't authenticated requests in the first place).
+const NO_REFRESH_PATHS = ['/api/auth/refresh', '/api/auth/login', '/api/auth/register']
+
+// Shared in-flight refresh call. If three components each get a 401 within
+// the same instant (e.g. three widgets loading on Dashboard mount right as
+// the access token expires), all three should await the SAME refresh
+// request and share its result — not each fire their own. Firing three
+// concurrent refreshes would rotate the refresh token three times, and only
+// the last response's tokens would end up being the "real" current ones,
+// silently invalidating the other two in-flight callers' assumptions.
+let refreshPromise = null
+
+/**
+ * Exchange the stored refresh token for a new access+refresh pair.
+ * Returns true on success (new tokens are already stored), false on failure
+ * (refresh token missing/expired/revoked — caller should treat this as a
+ * real "session ended" and log the user out).
+ *
+ * Uses raw fetch(), not request(), so this never recurses through the 401
+ * handling logic below.
+ */
+function performTokenRefresh() {
+  if (refreshPromise) return refreshPromise
+
+  refreshPromise = (async () => {
+    const storedRefreshToken = getRefreshToken()
+    if (!storedRefreshToken) return false
+
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/auth/refresh`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ refresh_token: storedRefreshToken }),
+      })
+      if (!res.ok) return false
+
+      const data = await res.json()
+      if (!data?.token || !data?.refresh_token) return false
+
+      setToken(data.token)
+      setRefreshToken(data.refresh_token)
+      return true
+    } catch {
+      // Network error during refresh — treat as failure, don't crash the app
+      return false
+    }
+  })()
+
+  // Clear the shared promise once it settles so the NEXT expiry cycle
+  // (potentially minutes later) starts a fresh refresh instead of reusing
+  // this resolved one forever.
+  refreshPromise.finally(() => { refreshPromise = null })
+
+  return refreshPromise
+}
+
+
 // ── Core request function ─────────────────────────────────────────────────────
 
 async function request(
@@ -100,6 +173,9 @@ async function request(
     headers = {},   // extra headers to merge
     skipAuth,       // true → don't attach Authorization header (public routes)
     silent,         // true → don't show error toasts (caller handles display)
+    _isRetry,       // internal — true when this call is a post-refresh retry;
+                     // prevents an infinite refresh→retry→401→refresh loop
+                     // if the NEW access token also somehow gets rejected
   } = options
 
   // ── Build headers ─────────────────────────────────────────────────────────
@@ -152,9 +228,24 @@ async function request(
 
   // ── Handle specific status codes ──────────────────────────────────────────
 
-  // 401 Unauthorized — token expired or invalid
-  // Clear stored credentials and redirect to login automatically
+  // 401 Unauthorized — access token expired, invalid, or (rarely) rejected
+  // for another reason. Try a silent refresh-and-retry before giving up.
   if (response.status === 401) {
+    const canAttemptRefresh =
+      !skipAuth &&                              // public routes were never authenticated — nothing to refresh
+      !_isRetry &&                              // don't refresh twice for the same original request
+      !NO_REFRESH_PATHS.includes(path) &&       // don't refresh in response to auth endpoints themselves
+      !!getRefreshToken()                       // nothing to refresh with if there's no refresh token stored
+
+    if (canAttemptRefresh) {
+      const refreshed = await performTokenRefresh()
+      if (refreshed) {
+        // Retry the original request exactly once with the new access token
+        return request(method, path, { ...options, _isRetry: true })
+      }
+    }
+
+    // Refresh wasn't attempted, or it failed — the session is genuinely over.
     clearToken()
     // Only redirect if we are not already on a public page
     // Prevents redirect loops on /login itself

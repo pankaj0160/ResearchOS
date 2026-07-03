@@ -51,7 +51,7 @@ export default function RegisterPage() {
         setError(res.error || 'Registration failed — please try again')
         return
       }
-      login(res.data.token, res.data.user)
+      login(res.data.token, res.data.user, res.data.refresh_token)
       navigate('/dashboard', { replace: true })
     } catch (err) {
       setError(err.message)

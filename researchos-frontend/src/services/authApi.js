@@ -45,6 +45,18 @@ export const authApi = {
   /** Update profile fields (city, default_topic) */
   updateMe: (updates) =>
     apiClient.patch('/api/auth/me', { body: updates }),
+
+  /** Revoke the current device's refresh token (this device only) */
+  logout: (refreshToken) =>
+    apiClient.post('/api/auth/logout', {
+      body: { refresh_token: refreshToken },
+      skipAuth: true,   // uses the refresh token itself, not the access token
+      silent: true,      // best-effort — don't toast if this fails, we're logging out anyway
+    }),
+
+  /** Revoke every refresh token for this account — every device, everywhere */
+  logoutAll: () =>
+    apiClient.post('/api/auth/logout-all'),
 }
 
 export default authApi

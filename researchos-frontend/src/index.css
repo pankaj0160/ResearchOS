@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,500;12..96,600;12..96,700;12..96,800&family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;1,9..40,400&family=JetBrains+Mono:wght@400;500&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,400;8..60,500;8..60,600;8..60,700&family=IBM+Plex+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
 
 @tailwind base;
 @tailwind components;
@@ -9,56 +9,84 @@
    ═══════════════════════════════════════════════════════════════════════════ */
 
 :root {
-  /* ── Brand ── */
-  --accent:        #1B6B45;   /* forest green — ResearchOS brand */
-  --accent-light:  #2D8F5F; 
-  --accent-dim:    #1B6B4512;
-  --accent-border: #1B6B4530;
-  --gold:          #C4973A;   /* research quality — scores, highlights */
-  --gold-dim:      #C4973A14;
-  --gold-border:   #C4973A30;
+  /* ── Brand — ResearchOS emerald/ochre system ──
+     Existing variable NAMES kept as-is (100+ usages across the app already
+     reference --accent, --gold, --bg-base, etc.) — only the VALUES change,
+     now matching the design guide exactly. New --accent-emerald-* / 
+     --accent-ochre-* aliases below give new components (Citation Chip,
+     Agent Status pills, etc.) the guide's exact vocabulary without forcing
+     a full rename sweep across every existing file. */
+  --accent:        #1F8A6B;   /* accent-emerald */
+  --accent-light:  #17715A;   /* accent-emerald-hover */
+  --accent-dim:    #1F8A6B12;
+  --accent-border: #1F8A6B30;
+  --gold:          #C98A2B;   /* accent-ochre — citation highlights, secondary emphasis */
+  --gold-dim:      #C98A2B14;
+  --gold-border:   #C98A2B30;
+
+  /* ── Semantic aliases matching the design guide's exact token names ── */
+  --accent-emerald:        var(--accent);
+  --accent-emerald-hover:  var(--accent-light);
+  --accent-emerald-subtle: #E4F2EC;
+  --accent-ochre:          var(--gold);
+  --accent-ochre-subtle:   #FBF0DC;
+  --bg-page:          #F1F3EF;
+  --bg-surface:       #FFFFFF;
+  --bg-surface-raised: #FFFFFF; /* paired with --shadow-md, see below */
+  --bg-inset:         #F6F7F4;
+
+  /* ── Status — did not exist before; used for success/error states,
+     quality-gate flags, and any component that was previously reaching
+     for a raw hex (e.g. #ef4444) instead of a token ── */
+  --success:        #2F9E5F;
+  --success-subtle: #E4F6EC;
+  --danger:         #DC4E4E;
+  --danger-subtle:  #FBE9E9;
 
   /* ── Light mode surfaces ── */
-  --bg-base:       #F7F5F0;   /* warm paper */
-  --bg-card:       #ffffff;
-  --bg-card-hover: #F3F1EB;
-  --bg-sidebar:    #0E0E0C;   /* deep ink */
-  --bg-input:      #ffffff;
+  --bg-base:       #F1F3EF;   /* = --bg-page */
+  --bg-card:       #FFFFFF;   /* = --bg-surface */
+  --bg-card-hover: #ECEFEA;
+  --bg-sidebar:    #0D110C;   /* always-dark sidebar uses the dark theme's bg-page */
+  --bg-input:      #FFFFFF;
 
   /* ── Light mode text ── */
-  --text-primary:   #0E0E0C;
-  --text-secondary: #3D3A35;
-  --text-muted:     #7A7669;
-  --text-faint:     #B0AB9E;
+  --text-primary:   #14180F;
+  --text-secondary: #545B4E;
+  --text-muted:     #8B927F;  /* = --text-tertiary */
+  --text-faint:     #A6AC9C;  /* between text-tertiary and border-strong — guide only defines 3 text tiers, this app uses 4 */
 
   /* ── Borders ── */
-  --border:        #E2DED6;
-  --border-strong: #CCC8BF;
+  --border:        #DCE1D8;
+  --border-strong: #BFC7BA;
 
-  /* ── Sidebar (always dark) ── */
-  --sb-bg:          #0E0E0C;
-  --sb-text:        #8A8479;
-  --sb-text-active: #F5F2EB;
-  --sb-hover:       #1A1917;
-  --sb-active:      #1F1F1C;
-  --sb-border:      #232320;
-  --sb-accent:      #1B6B45;
+  /* ── Sidebar (always dark — uses the dark theme's palette directly,
+     since a permanently-dark surface IS the dark theme regardless of
+     the app-wide light/dark toggle state) ── */
+  --sb-bg:          #0D110C;
+  --sb-text:        #A8AF9C;
+  --sb-text-active: #F1F3EC;
+  --sb-hover:       #151A12;
+  --sb-active:      #1C2318;
+  --sb-border:      #242C1E;
+  --sb-accent:      #3FBF95;
 
-  /* ── Typography ── */
-  --font-display: 'Bricolage Grotesque', system-ui, sans-serif;
-  --font-body:    'DM Sans', system-ui, sans-serif;
+  /* ── Typography — Source Serif 4 (reading/display) + IBM Plex Sans (UI)
+     per design guide Section 3. JetBrains Mono unchanged — already correct. ── */
+  --font-display: 'Source Serif 4', Georgia, serif;
+  --font-body:    'IBM Plex Sans', system-ui, sans-serif;
   --font-mono:    'JetBrains Mono', monospace;
 
-  /* ── Radii ── */
+  /* ── Radii — already matched the guide exactly (6/10/16), no change ── */
   --radius-sm:  6px;
   --radius:     10px;
   --radius-lg:  16px;
   --radius-xl:  24px;
 
   /* ── Shadows ── */
-  --shadow-sm: 0 1px 3px 0 rgb(0 0 0 / 0.06), 0 1px 2px -1px rgb(0 0 0 / 0.06);
+  --shadow-sm: 0 1px 2px rgba(20,24,15,0.06);
   --shadow:    0 4px 6px -1px rgb(0 0 0 / 0.07), 0 2px 4px -2px rgb(0 0 0 / 0.07);
-  --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.08), 0 4px 6px -4px rgb(0 0 0 / 0.08);
+  --shadow-lg: 0 8px 24px -12px rgba(20,24,15,0.18);
   --ease-out:      cubic-bezier(0.16, 1, 0.3, 1);
   --ease-spring:   cubic-bezier(0.34, 1.56, 0.64, 1);
   --duration-fast: 80ms;
@@ -70,22 +98,42 @@
   --sidebar-collapsed-width: 60px;
 }
 
-/* ── Dark mode overrides ── */
+/* ── Dark mode overrides — ResearchOS emerald/ochre dark palette ── */
 .dark {
-  --bg-base:        #0f0f0e;
-  --bg-card:        #1a1917;
-  --bg-card-hover:  #1f1e1c;
-  --bg-input:       #1a1917;
+  --accent:        #3FBF95;   /* accent-emerald, lifted for dark contrast */
+  --accent-light:  #56D1A8;   /* accent-emerald-hover */
+  --accent-dim:    #3FBF9518;
+  --accent-border: #3FBF9535;
+  --gold:          #E3A94E;   /* accent-ochre */
+  --gold-dim:      #E3A94E18;
+  --gold-border:   #E3A94E35;
 
-  --text-primary:   #fafaf9;
-  --text-secondary: #d6d3d1;
-  --text-muted:     #7A7669;
-  --text-faint:     #57534e;
+  --accent-emerald-subtle: #17281F;
+  --accent-ochre-subtle:   #2E2412;
+  --bg-page:           #0D110C;
+  --bg-surface:        #151A12;
+  --bg-surface-raised: #1C2318;
+  --bg-inset:          #0A0D08;
 
-  --border:         #292524;
-  --border-strong:  #3d3835;
+  --success:        #4CC97F;
+  --success-subtle: #132A1E;
+  --danger:         #F0716B;
+  --danger-subtle:  #2E1616;
 
-  --shadow-sm: 0 1px 3px 0 rgb(0 0 0 / 0.3);
+  --bg-base:        #0D110C;
+  --bg-card:        #151A12;
+  --bg-card-hover:  #1C2318;
+  --bg-input:       #151A12;
+
+  --text-primary:   #F1F3EC;
+  --text-secondary: #A8AF9C;
+  --text-muted:     #6D7563;
+  --text-faint:     #4A5140;
+
+  --border:         #242C1E;
+  --border-strong:  #38442D;
+
+  --shadow-sm: 0 1px 2px rgba(0,0,0,0.45);
   --shadow:    0 4px 6px -1px rgb(0 0 0 / 0.4);
   --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.5);
   --ease-out:      cubic-bezier(0.16, 1, 0.3, 1);
@@ -640,7 +688,6 @@ a { text-decoration: none; color: inherit; }
   background: var(--sb-active);
   font-weight: 500;
 }
-  border-left: 2px solid var(--sb-accent);
 
 .sidebar-nav-item--active svg { color: var(--sb-accent); }
 
@@ -1054,6 +1101,30 @@ a { text-decoration: none; color: inherit; }
   flex: 1;
   overflow: hidden;
   min-height: 0;
+}
+
+/* Below 900px, the 260px fixed sidebar column left almost no room for the
+   chat panel (e.g. ~100px wide on a 375px phone) — there was no breakpoint
+   here at all before. Stack sidebar above chat instead, and let the page
+   scroll normally rather than fighting a fixed 100vh height, since a
+   stacked layout can't sanely live inside a hard overflow:hidden box. */
+@media (max-width: 900px) {
+  .rag-page {
+    height: auto;
+    overflow: visible;
+    padding: 1rem 1rem 0;
+  }
+  .rag-layout {
+    grid-template-columns: 1fr;
+    overflow: visible;
+  }
+  .rag-sidebar-col {
+    overflow: visible;
+    max-height: 45vh;   /* sessions/upload list scrolls internally instead of pushing chat far down */
+  }
+  .rag-chat-col {
+    min-height: 60vh;   /* chat stays usable instead of collapsing to whatever space is left */
+  }
 }
 
 /* ── Left sidebar ── */
@@ -2342,6 +2413,86 @@ a { text-decoration: none; color: inherit; }
 @media (max-width: 1100px) { .dash-top-grid { grid-template-columns: 1fr 1fr; } }
 @media (max-width: 700px)  { .dash-top-grid { grid-template-columns: 1fr; } }
 
+/* ── Bottom 2-col grid (Activity + Chat) ──
+   Previously had NO breakpoint at all — stayed a fixed 1fr 1fr grid down to
+   the smallest phone widths, squeezing both the activity feed and the chat
+   panel into ~half-width columns on mobile. */
+.dash-bottom-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+}
+@media (max-width: 900px) { .dash-bottom-grid { grid-template-columns: 1fr; } }
+
+/* ── Stats row (3 cards) — previously a fixed inline repeat(3,1fr) with
+   no breakpoint at all, squeezing each card to ~1/3 of a phone screen. ── */
+.dash-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.75rem;
+}
+@media (max-width: 640px) { .dash-stats-grid { grid-template-columns: 1fr; } }
+
+/* ── Quick actions (4 buttons) — same issue, fixed repeat(4,1fr). ── */
+.dash-quick-actions-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 0.75rem;
+}
+@media (max-width: 700px) { .dash-quick-actions-grid { grid-template-columns: 1fr 1fr; } }
+@media (max-width: 420px) { .dash-quick-actions-grid { grid-template-columns: 1fr; } }
+
+
+/* ── Hero greeting header ──
+   Reuses the same glow-orb + grid-pattern language as .auth-bg-orb /
+   .auth-bg-grid so the dashboard's first impression matches the login
+   page's premium feel instead of looking like a plain text header. */
+.dash-hero {
+  position: relative;
+  overflow: hidden;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  padding: 1.75rem 2rem;
+}
+
+.dash-hero-orb {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(70px);
+  pointer-events: none;
+  opacity: 0.5;
+}
+.dash-hero-orb--accent {
+  width: 320px; height: 320px;
+  top: -140px; right: -80px;
+  background: radial-gradient(circle, var(--accent) 0%, transparent 70%);
+}
+.dash-hero-orb--gold {
+  width: 260px; height: 260px;
+  bottom: -140px; left: 10%;
+  background: radial-gradient(circle, var(--gold) 0%, transparent 70%);
+  opacity: 0.3;
+}
+
+.dash-hero-grid-pattern {
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(var(--border) 1px, transparent 1px),
+    linear-gradient(90deg, var(--border) 1px, transparent 1px);
+  background-size: 32px 32px;
+  opacity: 0.35;
+  -webkit-mask-image: radial-gradient(ellipse 70% 100% at 30% 0%, black, transparent);
+  mask-image: radial-gradient(ellipse 70% 100% at 30% 0%, black, transparent);
+}
+
+.dash-hero-content { position: relative; z-index: 1; }
+
+@media (max-width: 700px) {
+  .dash-hero { padding: 1.25rem 1.25rem; }
+}
+
 /* ── Base card ── */
 .dash-card {
   background: var(--bg-card);
@@ -2366,6 +2517,40 @@ a { text-decoration: none; color: inherit; }
 .dash-card-icon {
   font-size: 1rem;
   line-height: 1;
+}
+
+/* ── Icon chip — colored badge for QuickActions / StatCard icons ──
+   Replaces bare emoji-on-transparent with a soft-tinted rounded square,
+   using the same rgba-tint pattern as --accent-dim elsewhere in this file. */
+.dash-icon-chip {
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.05rem;
+  flex-shrink: 0;
+}
+
+/* ── Staggered entrance for dashboard sections ──
+   Each section fades up in sequence instead of the whole page popping in
+   at once — a small but real "polished product" signal. */
+.dash-stagger {
+  animation: dash-stagger-in 0.36s var(--ease-out) both;
+}
+.dash-stagger--1 { animation-delay: 0.02s; }
+.dash-stagger--2 { animation-delay: 0.07s; }
+.dash-stagger--3 { animation-delay: 0.12s; }
+.dash-stagger--4 { animation-delay: 0.17s; }
+
+@keyframes dash-stagger-in {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dash-stagger, .page-fade { animation: none; }
 }
 
 .dash-card-title {
@@ -3133,6 +3318,121 @@ select:focus {
 .mobile-menu-btn:hover {
   background: var(--bg-card-hover);
   color: var(--text-primary);
+}
+
+
+/* ── Mobile top bar + bottom nav ──────────────────────────────────────────── */
+/* AppShell.jsx renders these as bare classNames with no inline styling —
+   this is the block that was missing entirely, which is why the mobile
+   bottom nav had no fixed positioning (so it could render as a stray
+   flex item instead of docking to the screen bottom) and why page content
+   had no bottom clearance to avoid sitting underneath it once it WAS fixed.
+   Both the JS `isMobile` check (AppShell.jsx) and every media query below
+   use the same 768px threshold so the two can never disagree mid-resize. */
+
+.mobile-top-bar,
+.mobile-bottom-nav {
+  display: none; /* desktop: neither element exists visually */
+}
+
+@media (max-width: 768px) {
+
+  /* Top bar sits in normal document flow (first child, column layout) —
+     NOT position:fixed — so it can never overlap the content beneath it. */
+  .mobile-top-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    height: 56px;
+    flex-shrink: 0;
+    padding: 0 14px;
+    padding-top: env(safe-area-inset-top, 0px); /* clears the iOS notch/status bar */
+    background: var(--bg-card);
+    border-bottom: 1px solid var(--border);
+    position: sticky;
+    top: 0;
+    z-index: 40; /* below the sidebar drawer (100) and its backdrop (99) */
+  }
+
+  .mobile-top-bar-logo {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    overflow: hidden;
+  }
+
+  .mobile-top-bar-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+  }
+
+  /* Bottom nav MUST be position:fixed — AppShell.jsx renders it as a
+     sibling of the sidebar+main flex row, so without this it would lay
+     out as a flex item instead of docking to the viewport bottom. */
+  .mobile-bottom-nav {
+    display: flex;
+    align-items: stretch;
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: calc(56px + env(safe-area-inset-bottom, 0px));
+    padding-bottom: env(safe-area-inset-bottom, 0px); /* clears the iOS home indicator */
+    background: var(--bg-card);
+    border-top: 1px solid var(--border);
+    z-index: 60; /* above page content, below the sidebar drawer */
+  }
+
+  .mobile-bottom-nav-item {
+    flex: 1;                      /* equal-width tabs regardless of item count */
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    color: var(--text-faint);
+    text-decoration: none;
+    transition: color var(--duration-fast) ease;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .mobile-bottom-nav-item:active { color: var(--text-muted); }
+
+  .mobile-bottom-nav-item--active {
+    color: var(--accent);
+  }
+
+  .mobile-bottom-nav-label {
+    font-size: 10.5px;
+    font-weight: 500;
+    letter-spacing: -0.01em;
+    white-space: nowrap;
+  }
+
+  /* THE ACTUAL OVERLAY FIX: give the scrollable content area enough
+     bottom clearance to never sit underneath the fixed bottom nav, and
+     tighten the desktop-sized 28px/36px padding which was cramped on
+     narrow phones. AppShell.jsx sets padding inline, so !important is
+     required to override it here — same pattern already used elsewhere
+     in this file for the same reason (inline style vs. media query). */
+  .app-shell-main {
+    padding: 16px 14px
+             calc(56px + env(safe-area-inset-bottom, 0px) + 16px)
+             14px !important;
+  }
+}
+
+/* Tablet: sidebar + content both still fit, but tighten side padding a
+   little so cards/grids aren't flush against the viewport edge. */
+@media (min-width: 769px) and (max-width: 1024px) {
+  .app-shell-main {
+    padding: 24px 24px !important;
+  }
 }
 
 

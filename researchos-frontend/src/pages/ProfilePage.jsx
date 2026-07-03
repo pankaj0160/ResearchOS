@@ -1,5 +1,7 @@
 import { useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
+import { useToast } from '../hooks/useToast'
 
 const NEWS_CATEGORIES = [
   'technology', 'science', 'business', 'health',
@@ -8,13 +10,16 @@ const NEWS_CATEGORIES = [
 ]
 
 export default function ProfilePage() {
-  const { user, updateProfile, logout } = useAuth()
+  const { user, updateProfile, logout, logoutAll } = useAuth()
+  const navigate = useNavigate()
+  const { toast } = useToast()
 
   const [city,   setCity]   = useState(user?.city         ?? '')
   const [topic,  setTopic]  = useState(user?.default_topic ?? '')
   const [saving, setSaving] = useState(false)
   const [saved,  setSaved]  = useState(false)
   const [error,  setError]  = useState('')
+  const [loggingOutAll, setLoggingOutAll] = useState(false)
 
   const handleSave = async (e) => {
     e.preventDefault()
@@ -342,6 +347,32 @@ export default function ProfilePage() {
           >
             Sign out
           </button>
+
+          <div style={{ marginTop: '1.1rem', paddingTop: '1.1rem', borderTop: '1px solid var(--border)' }}>
+            <p className="session-desc" style={{ marginBottom: 8 }}>
+              Signed in somewhere you don't recognize, or lost a device? Sign out everywhere at once.
+            </p>
+            <button
+              className="btn-signout"
+              disabled={loggingOutAll}
+              style={{ borderColor: 'rgba(239,68,68,0.35)', color: '#ef4444', opacity: loggingOutAll ? 0.6 : 1 }}
+              onClick={async () => {
+                if (typeof logoutAll !== 'function') return
+                setLoggingOutAll(true)
+                try {
+                  const result = await logoutAll()
+                  if (result?.ok) {
+                    toast.success(`Signed out of ${result.data?.sessions_revoked ?? 'all'} session(s)`)
+                  }
+                } finally {
+                  setLoggingOutAll(false)
+                  navigate('/login', { replace: true })
+                }
+              }}
+            >
+              {loggingOutAll ? 'Signing out everywhere…' : 'Log out of all devices'}
+            </button>
+          </div>
         </div>
       </div>
     </>
