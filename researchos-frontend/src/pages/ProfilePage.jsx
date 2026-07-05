@@ -50,7 +50,7 @@ export default function ProfilePage() {
           font-weight: 700;
           letter-spacing: 0.12em;
           text-transform: uppercase;
-          color: #6366f1;
+          color: var(--accent);
           margin-bottom: 6px;
         }
 
@@ -75,7 +75,7 @@ export default function ProfilePage() {
           font-weight: 700;
           text-transform: uppercase;
           letter-spacing: 0.1em;
-          color: #6366f1;
+          color: var(--accent);
           margin: 0 0 14px;
         }
 
@@ -130,7 +130,7 @@ export default function ProfilePage() {
         }
 
         .form-input:focus {
-          border-color: #6366f1;
+          border-color: var(--accent);
           background: var(--bg-card);
         }
 
@@ -152,7 +152,7 @@ export default function ProfilePage() {
           font-weight: 600;
           font-family: inherit;
           cursor: pointer;
-          background: #6366f1;
+          background: var(--accent);
           border: none;
           border-radius: 10px;
           color: #fff;
@@ -160,7 +160,7 @@ export default function ProfilePage() {
         }
 
         .btn-save:hover:not(:disabled) {
-          background: #4f51e0;
+          background: color-mix(in srgb, var(--accent) 85%, black);
           transform: translateY(-1px);
         }
 

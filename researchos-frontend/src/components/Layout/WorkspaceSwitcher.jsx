@@ -76,7 +76,7 @@ export function WorkspaceSwitcher({ collapsed, onOpenCreate }) {
               onClick={() => { selectWorkspace(null); setOpen(false) }}
               style={{
                 padding: '8px 14px', fontSize: 13, cursor: 'pointer',
-                color: !activeWorkspace ? '#818cf8' : '#a1a1aa',
+                color: !activeWorkspace ? 'var(--agent-critic)' : '#a1a1aa',
                 fontWeight: !activeWorkspace ? 600 : 400,
                 display: 'flex', alignItems: 'center', gap: 8,
               }}
@@ -92,7 +92,7 @@ export function WorkspaceSwitcher({ collapsed, onOpenCreate }) {
                 key={ws.id}
                 style={{
                   padding: '8px 14px', fontSize: 13, cursor: 'pointer',
-                  color: activeWorkspace?.id === ws.id ? '#818cf8' : isDark ? '#fafafa' : '#111827',
+                  color: activeWorkspace?.id === ws.id ? 'var(--agent-critic)' : isDark ? '#fafafa' : '#111827',
                   fontWeight: activeWorkspace?.id === ws.id ? 600 : 400,
                   display: 'flex', alignItems: 'center', gap: 8,
                 }}
@@ -100,7 +100,7 @@ export function WorkspaceSwitcher({ collapsed, onOpenCreate }) {
                 onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
               >
                 {activeWorkspace?.id === ws.id
-                  ? <span style={{ color: '#818cf8', fontSize: 11 }}>✓</span>
+                  ? <span style={{ color: 'var(--agent-critic)', fontSize: 11 }}>✓</span>
                   : <span style={{ width: 11 }} />}
                 <span
                   style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
@@ -127,7 +127,7 @@ export function WorkspaceSwitcher({ collapsed, onOpenCreate }) {
               onClick={() => { setOpen(false); onOpenCreate() }}
               style={{
                 width: '100%', background: 'none', border: 'none',
-                color: '#818cf8', fontSize: 13, fontWeight: 600,
+                color: 'var(--agent-critic)', fontSize: 13, fontWeight: 600,
                 cursor: 'pointer', textAlign: 'left', padding: '4px 0',
               }}
             >

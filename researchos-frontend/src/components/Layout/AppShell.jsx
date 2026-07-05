@@ -32,6 +32,7 @@ import { WorkspaceSwitcher }   from './WorkspaceSwitcher'
 import { CreateWorkspaceModal } from './CreateWorkspaceModal'
 import { searchApi }           from '../../services/searchApi'
 import ToastContainer          from '../ToastContainer'
+import Logo                    from '../Logo'
 
 // ── Navigation config ─────────────────────────────────────────────────────────
 const NAV = [
@@ -247,39 +248,21 @@ export default function AppShell() {
               textDecoration: 'none', overflow: 'hidden', minWidth: 0,
             }}
           >
-            {/* ── NEW LOGO MARK — clean forest green, no gradient, no glow ── */}
-            <div style={{
-              width: '30px', height: '30px', borderRadius: '8px',
-              background: SB.accent,
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              flexShrink: 0,
-              // Subtle transition — logo mark glows softly on hover
-              transition: 'box-shadow 0.15s ease',
-            }}>
-              {/* R mark — clean geometric */}
-              <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-                <text
-                  x="3" y="13"
-                  fontFamily="'Bricolage Grotesque', system-ui, sans-serif"
-                  fontWeight="700"
-                  fontSize="14"
-                  fill="#ffffff"
-                >R</text>
-              </svg>
-            </div>
-
-            {/* Wordmark — hidden when collapsed */}
-            {!collapsed && (
-              <span style={{
-                fontSize: '14px', fontWeight: '600',
-                color: '#F5F2EB',
-                letterSpacing: '-0.02em',
-                whiteSpace: 'nowrap',
-                fontFamily: 'var(--font-display)',
-              }}>
-                ResearchOS
-              </span>
-            )}
+            <Logo
+              size={30}
+              markOnly={collapsed}
+              showWordmark={!collapsed}
+              wordmarkColor={SB.textActive}
+              hexColor="rgba(245,242,235,0.3)"
+              osTagColor={SB.accent}
+              osTagTextColor="#F5F2EB"
+              colors={{
+                search: 'var(--agent-search)',
+                reader: 'var(--agent-reader)',
+                writer: 'var(--agent-writer)',
+                critic: 'var(--agent-critic)',
+              }}
+            />
           </Link>
 
           {/* Collapse toggle button — on mobile, closes drawer instead of collapsing */}
@@ -653,15 +636,19 @@ export default function AppShell() {
               <HamburgerIcon size={18} />
             </button>
             <Link to="/dashboard" className="mobile-top-bar-logo" style={{ textDecoration: 'none' }}>
-              <div style={{
-                width: '24px', height: '24px', borderRadius: '6px',
-                background: SB.accent, display: 'flex', alignItems: 'center',
-                justifyContent: 'center', color: '#fff', fontWeight: '700', fontSize: '13px',
-              }}>R</div>
-              <span style={{
-                fontSize: '14px', fontWeight: '600', color: text,
-                letterSpacing: '-0.02em',
-              }}>ResearchOS</span>
+              <Logo
+                size={24}
+                wordmarkColor={text}
+                hexColor="var(--text-faint)"
+                osTagColor={SB.accent}
+                osTagTextColor="#F5F2EB"
+                colors={{
+                  search: 'var(--agent-search)',
+                  reader: 'var(--agent-reader)',
+                  writer: 'var(--agent-writer)',
+                  critic: 'var(--agent-critic)',
+                }}
+              />
             </Link>
           </div>
 

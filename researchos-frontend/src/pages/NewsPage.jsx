@@ -306,27 +306,27 @@ export default function NewsPage() {
         }
 
         .news-action-btn--primary {
-          background: #6366f1;
-          border-color: #6366f1;
+          background: var(--accent);
+          border-color: var(--accent);
           color: #fff;
         }
         .news-action-btn--primary:hover:not(:disabled) {
-          background: #4f51e0;
+          background: color-mix(in srgb, var(--accent) 85%, black);
         }
 
         .news-action-btn--research {
-          background: rgba(245,158,11,0.08);
-          border-color: rgba(245,158,11,0.3);
-          color: #d97706;
+          background: color-mix(in srgb, var(--agent-writer) 10%, transparent);
+          border-color: color-mix(in srgb, var(--agent-writer) 32%, transparent);
+          color: var(--agent-writer);
         }
         .news-action-btn--research:hover:not(:disabled) {
-          background: rgba(245,158,11,0.14);
+          background: color-mix(in srgb, var(--agent-writer) 16%, transparent);
         }
 
         .news-action-btn--success {
-          background: rgba(34,197,94,0.1);
-          border-color: rgba(34,197,94,0.3);
-          color: #16a34a;
+          background: color-mix(in srgb, var(--success) 10%, transparent);
+          border-color: color-mix(in srgb, var(--success) 32%, transparent);
+          color: var(--success);
         }
 
       `}</style>

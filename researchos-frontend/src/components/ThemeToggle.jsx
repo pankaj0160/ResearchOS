@@ -1,50 +1,44 @@
+/**
+ * ThemeToggle.jsx
+ * Location: src/components/ThemeToggle.jsx
+ *
+ * Bug fixed: this previously destructured { theme, setTheme } from
+ * useTheme(), but ThemeProvider only ever exposed { isDark, toggleTheme } —
+ * so every click threw / silently no-opped depending on call site. Now
+ * wired to the provider's real API.
+ *
+ * Redesigned as a rocker switch (not a segmented pill or bare icon
+ * button) to match the rest of the design system's instrument-panel
+ * detailing — same pattern used in the marketing site's theme switch.
+ */
 import { memo } from 'react'
 import { useTheme } from '../context/ThemeProvider'
 
 function ThemeToggle({ iconOnly = false }) {
-  const { theme, setTheme } = useTheme()
-  const isDark = theme === 'dark'
+  const { isDark, toggleTheme } = useTheme()
 
-  // Icon-only version for mobile navbar — single tap to toggle
-  if (iconOnly) {
-    return (
-      <button
-        type="button"
-        onClick={() => setTheme(isDark ? 'light' : 'dark')}
-        aria-label={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
-        className="flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 shadow-sm transition hover:bg-slate-100 hover:text-slate-950 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-white dark:focus:ring-offset-slate-950"
-      >
-        {isDark ? <SunIcon /> : <MoonIcon />}
-      </button>
-    )
-  }
-
-  // Full pill version for desktop
   return (
-    <div
-      className="flex items-center rounded-lg border border-slate-200 bg-white p-1 shadow-sm dark:border-slate-700 dark:bg-slate-900"
-      role="group"
-      aria-label="Theme selection"
+    <button
+      type="button"
+      role="switch"
+      aria-checked={!isDark}
+      aria-label={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
+      onClick={toggleTheme}
+      className="theme-rocker"
+      style={{
+        width: iconOnly ? 40 : 52,
+        height: iconOnly ? 40 : 28,
+        borderRadius: iconOnly ? 10 : 20,
+      }}
     >
-      {['light', 'dark'].map((option) => {
-        const active = theme === option
-        return (
-          <button
-            key={option}
-            type="button"
-            onClick={() => setTheme(option)}
-            aria-pressed={active}
-            className={`rounded-md px-3 py-1.5 text-sm font-medium capitalize transition focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 focus:ring-offset-white dark:focus:ring-offset-slate-950 ${
-              active
-                ? 'bg-slate-900 text-white dark:bg-white dark:text-slate-950'
-                : 'text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800'
-            }`}
-          >
-            {option}
-          </button>
-        )
-      })}
-    </div>
+      {iconOnly ? (
+        isDark ? <MoonIcon /> : <SunIcon />
+      ) : (
+        <span className="theme-rocker-thumb" style={{ transform: isDark ? 'translateX(0)' : 'translateX(24px)' }}>
+          {isDark ? <MoonIcon size={12} /> : <SunIcon size={12} />}
+        </span>
+      )}
+    </button>
   )
 }
 
@@ -52,25 +46,25 @@ export default memo(ThemeToggle)
 
 /* ── Icons ── */
 
-function SunIcon() {
+function SunIcon({ size = 16 }) {
   return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <circle cx="12" cy="12" r="5" />
-      <line x1="12" y1="1"  x2="12" y2="3"  />
-      <line x1="12" y1="21" x2="12" y2="23" />
-      <line x1="4.22" y1="4.22"   x2="5.64" y2="5.64"   />
-      <line x1="18.36" y1="18.36" x2="19.78" y2="19.78" />
-      <line x1="1"  y1="12" x2="3"  y2="12" />
-      <line x1="21" y1="12" x2="23" y2="12" />
-      <line x1="4.22" y1="19.78"  x2="5.64" y2="18.36"  />
-      <line x1="18.36" y1="5.64"  x2="19.78" y2="4.22"  />
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="12" r="4.3" />
+      <line x1="12" y1="2.5" x2="12" y2="4.3" />
+      <line x1="12" y1="19.7" x2="12" y2="21.5" />
+      <line x1="2.5" y1="12" x2="4.3" y2="12" />
+      <line x1="19.7" y1="12" x2="21.5" y2="12" />
+      <line x1="5.3" y1="5.3" x2="6.6" y2="6.6" />
+      <line x1="17.4" y1="17.4" x2="18.7" y2="18.7" />
+      <line x1="5.3" y1="18.7" x2="6.6" y2="17.4" />
+      <line x1="17.4" y1="6.6" x2="18.7" y2="5.3" />
     </svg>
   )
 }
 
-function MoonIcon() {
+function MoonIcon({ size = 16 }) {
   return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
     </svg>
   )

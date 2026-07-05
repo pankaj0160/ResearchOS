@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { authApi } from '../services/authApi'
+import Logo from '../components/Logo'
 
 export default function ForgotPasswordPage() {
   const [email,   setEmail]   = useState('')
@@ -25,14 +26,24 @@ export default function ForgotPasswordPage() {
   return (
     <div className="auth-page">
       <div className="auth-bg">
-        <div className="auth-bg-orb auth-bg-orb--1" />
-        <div className="auth-bg-orb auth-bg-orb--2" />
+        <div className="auth-bg-dots" />
         <div className="auth-bg-grid" />
       </div>
 
       <Link to="/" className="auth-logo">
-        <span className="auth-logo-mark">R</span>
-        <span className="auth-logo-text">ResearchOS</span>
+        <Logo
+          size={30}
+          wordmarkColor="var(--text-primary)"
+          hexColor="var(--text-faint)"
+          osTagColor="var(--accent)"
+          osTagTextColor="#fff"
+          colors={{
+            search: 'var(--agent-search)',
+            reader: 'var(--agent-reader)',
+            writer: 'var(--agent-writer)',
+            critic: 'var(--agent-critic)',
+          }}
+        />
       </Link>
 
       <div className="auth-card">

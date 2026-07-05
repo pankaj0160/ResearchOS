@@ -28,7 +28,7 @@ export function ArticleCard({ article, index }) {
     ? `https://www.google.com/s2/favicons?domain=${domain}&sz=16`
     : null
   const relevancePct  = Math.min(100, Math.round((article.score ?? 0) * 100))
-  const scoreColor    = relevancePct >= 70 ? 'var(--accent)' : relevancePct >= 40 ? '#F59E0B' : 'var(--text-faint)'
+  const scoreColor    = relevancePct >= 70 ? 'var(--accent)' : relevancePct >= 40 ? 'var(--agent-writer)' : 'var(--text-faint)'
 
   return (
     <a
@@ -179,7 +179,7 @@ export function ArticleCard({ article, index }) {
                 fontFamily:   'inherit',
                 flexShrink:   0,
               }}
-              onMouseEnter={e => e.currentTarget.style.background = 'var(--accent)' && (e.currentTarget.style.color = '#fff')}
+              onMouseEnter={e => { e.currentTarget.style.background = 'var(--accent)'; e.currentTarget.style.color = '#fff' }}
               onMouseLeave={e => { e.currentTarget.style.background = 'var(--accent-dim)'; e.currentTarget.style.color = 'var(--accent)' }}
             >
               🔬 Research →

@@ -11,9 +11,9 @@
 import { useEffect, useState } from 'react'
 
 const COLOR_OPTIONS = [
+  { value: '#10B981', label: 'Green'  },
   { value: '#3B82F6', label: 'Blue'   },
   { value: '#EF4444', label: 'Red'    },
-  { value: '#10B981', label: 'Green'  },
   { value: '#F59E0B', label: 'Amber'  },
   { value: '#8B5CF6', label: 'Purple' },
   { value: '#EC4899', label: 'Pink'   },

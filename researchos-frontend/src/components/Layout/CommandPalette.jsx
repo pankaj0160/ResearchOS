@@ -305,7 +305,7 @@ const PALETTE_CSS = `
 .cp-backdrop {
   --cp-bg-panel:       #ffffff;
   --cp-bg-row-hover:   #f4f4f5;
-  --cp-bg-row-active:  #ede9fe;
+  --cp-bg-row-active:  rgba(198,130,31,0.12);
   --cp-bg-input:       #f9f9fb;
   --cp-bg-badge:       #f4f4f5;
   --cp-bg-kbd:         #f0f0f2;
@@ -313,7 +313,7 @@ const PALETTE_CSS = `
   --cp-text-primary:   #09090b;
   --cp-text-secondary: #52525b;
   --cp-text-muted:     #a1a1aa;
-  --cp-text-active:    #4f46e5;
+  --cp-text-active:    #C6821F;
   --cp-text-hint:      #a1a1aa;
 
   --cp-border-panel:   rgba(0, 0, 0, 0.10);
@@ -323,15 +323,15 @@ const PALETTE_CSS = `
   --cp-backdrop-bg:    rgba(0, 0, 0, 0.40);
   --cp-shadow-panel:   0 8px 40px rgba(0,0,0,0.14), 0 2px 8px rgba(0,0,0,0.08);
 
-  /* Type badge colors — light */
-  --cp-type-research-bg:   #ede9fe;
-  --cp-type-research-text: #4f46e5;
-  --cp-type-pdf-bg:        #ccfbf1;
-  --cp-type-pdf-text:      #0d9488;
-  --cp-type-news-bg:       #fef9c3;
-  --cp-type-news-text:     #a16207;
-  --cp-type-workspace-bg:  #f3e8ff;
-  --cp-type-workspace-text:#7c3aed;
+  /* Type badge colors — light — one per pipeline agent hue */
+  --cp-type-research-bg:   rgba(198,130,31,0.14);
+  --cp-type-research-text: #C6821F;
+  --cp-type-pdf-bg:        rgba(47,122,108,0.14);
+  --cp-type-pdf-text:      #2F7A6C;
+  --cp-type-news-bg:       rgba(168,83,42,0.14);
+  --cp-type-news-text:     #A8532A;
+  --cp-type-workspace-bg:  rgba(163,56,74,0.14);
+  --cp-type-workspace-text:#A3384A;
   --cp-type-default-bg:    #f4f4f5;
   --cp-type-default-text:  #52525b;
 }
@@ -341,7 +341,7 @@ const PALETTE_CSS = `
   .cp-backdrop {
     --cp-bg-panel:       #111113;
     --cp-bg-row-hover:   rgba(255,255,255,0.05);
-    --cp-bg-row-active:  rgba(99,102,241,0.14);
+    --cp-bg-row-active:  rgba(226,163,59,0.16);
     --cp-bg-input:       #111113;
     --cp-bg-badge:       rgba(255,255,255,0.07);
     --cp-bg-kbd:         rgba(255,255,255,0.07);
@@ -349,7 +349,7 @@ const PALETTE_CSS = `
     --cp-text-primary:   #fafafa;
     --cp-text-secondary: #a1a1aa;
     --cp-text-muted:     #52525b;
-    --cp-text-active:    #818cf8;
+    --cp-text-active:    #E2A33B;
     --cp-text-hint:      #3f3f46;
 
     --cp-border-panel:   rgba(255,255,255,0.10);
@@ -359,14 +359,14 @@ const PALETTE_CSS = `
     --cp-backdrop-bg:    rgba(0,0,0,0.65);
     --cp-shadow-panel:   0 30px 80px rgba(0,0,0,0.6);
 
-    --cp-type-research-bg:   rgba(99,102,241,0.18);
-    --cp-type-research-text: #818cf8;
-    --cp-type-pdf-bg:        rgba(45,212,191,0.15);
-    --cp-type-pdf-text:      #2dd4bf;
-    --cp-type-news-bg:       rgba(251,191,36,0.15);
-    --cp-type-news-text:     #fbbf24;
-    --cp-type-workspace-bg:  rgba(192,132,252,0.15);
-    --cp-type-workspace-text:#c084fc;
+    --cp-type-research-bg:   rgba(226,163,59,0.18);
+    --cp-type-research-text: #E2A33B;
+    --cp-type-pdf-bg:        rgba(76,156,142,0.16);
+    --cp-type-pdf-text:      #4C9C8E;
+    --cp-type-news-bg:       rgba(196,106,59,0.16);
+    --cp-type-news-text:     #C46A3B;
+    --cp-type-workspace-bg:  rgba(193,73,90,0.16);
+    --cp-type-workspace-text:#C1495A;
     --cp-type-default-bg:    rgba(255,255,255,0.07);
     --cp-type-default-text:  #a1a1aa;
   }
@@ -377,7 +377,7 @@ const PALETTE_CSS = `
 .dark .cp-backdrop {
     --cp-bg-panel:       #111113;
     --cp-bg-row-hover:   rgba(255,255,255,0.05);
-    --cp-bg-row-active:  rgba(99,102,241,0.14);
+    --cp-bg-row-active:  rgba(226,163,59,0.16);
     --cp-bg-input:       #111113;
     --cp-bg-badge:       rgba(255,255,255,0.07);
     --cp-bg-kbd:         rgba(255,255,255,0.07);
@@ -385,7 +385,7 @@ const PALETTE_CSS = `
     --cp-text-primary:   #fafafa;
     --cp-text-secondary: #a1a1aa;
     --cp-text-muted:     #52525b;
-    --cp-text-active:    #818cf8;
+    --cp-text-active:    #E2A33B;
     --cp-text-hint:      #3f3f46;
 
     --cp-border-panel:   rgba(255,255,255,0.10);
@@ -395,14 +395,14 @@ const PALETTE_CSS = `
     --cp-backdrop-bg:    rgba(0,0,0,0.65);
     --cp-shadow-panel:   0 30px 80px rgba(0,0,0,0.6);
 
-    --cp-type-research-bg:   rgba(99,102,241,0.18);
-    --cp-type-research-text: #818cf8;
-    --cp-type-pdf-bg:        rgba(45,212,191,0.15);
-    --cp-type-pdf-text:      #2dd4bf;
-    --cp-type-news-bg:       rgba(251,191,36,0.15);
-    --cp-type-news-text:     #fbbf24;
-    --cp-type-workspace-bg:  rgba(192,132,252,0.15);
-    --cp-type-workspace-text:#c084fc;
+    --cp-type-research-bg:   rgba(226,163,59,0.18);
+    --cp-type-research-text: #E2A33B;
+    --cp-type-pdf-bg:        rgba(76,156,142,0.16);
+    --cp-type-pdf-text:      #4C9C8E;
+    --cp-type-news-bg:       rgba(196,106,59,0.16);
+    --cp-type-news-text:     #C46A3B;
+    --cp-type-workspace-bg:  rgba(193,73,90,0.16);
+    --cp-type-workspace-text:#C1495A;
     --cp-type-default-bg:    rgba(255,255,255,0.07);
     --cp-type-default-text:  #a1a1aa;
 }

@@ -112,8 +112,8 @@ function HeadlineItem({ headline, index }) {
             title="Research this topic"
             style={{
               padding: '2px 8px', fontSize: 10, fontWeight: 600, cursor: 'pointer',
-              background: 'rgba(99,102,241,0.1)', border: '1px solid rgba(99,102,241,0.25)',
-              borderRadius: 5, color: '#818cf8',
+              background: 'color-mix(in srgb, var(--agent-search) 12%, transparent)', border: '1px solid color-mix(in srgb, var(--agent-search) 30%, transparent)',
+              borderRadius: 5, color: 'var(--agent-search)',
             }}
           >🔬 Research</button>
         </div>

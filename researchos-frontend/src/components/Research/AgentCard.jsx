@@ -4,9 +4,9 @@
  */
 
 const COLOR_MAP = {
-  amber:  { text: 'text-amber',  border: 'border-amber',  bg: 'bg-amber',  hex: '#f59e0b' },
-  teal:   { text: 'text-teal',   border: 'border-teal',   bg: 'bg-teal',   hex: '#14b8a6' },
-  indigo: { text: 'text-indigo', border: 'border-indigo', bg: 'bg-indigo', hex: '#6366f1' },
+  amber:  { text: 'text-amber',  border: 'border-amber',  bg: 'bg-amber',  hex: '#E2A33B' },
+  teal:   { text: 'text-teal',   border: 'border-teal',   bg: 'bg-teal',   hex: '#4C9C8E' },
+  indigo: { text: 'text-indigo', border: 'border-indigo', bg: 'bg-indigo', hex: '#C1495A' },
   green:  { text: 'text-green',  border: 'border-green',  bg: 'bg-green',  hex: '#22c55e' },
 }
 
@@ -142,9 +142,9 @@ function StatusPill({ status, colors }) {
 
 function getGlow(color) {
   const map = {
-    amber:  'shadow-[0_0_24px_#f59e0b18]',
-    teal:   'shadow-[0_0_24px_#14b8a618]',
-    indigo: 'shadow-[0_0_24px_#6366f118]',
+    amber:  'shadow-[0_0_24px_#E2A33B18]',
+    teal:   'shadow-[0_0_24px_#4C9C8E18]',
+    indigo: 'shadow-[0_0_24px_#C1495A18]',
     green:  'shadow-[0_0_24px_#22c55e18]',
   }
   return map[color] || ''

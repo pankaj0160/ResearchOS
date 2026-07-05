@@ -25,16 +25,16 @@ const MONTHS = ['January','February','March','April','May','June',
 
 // Color per event type — use CSS variables so they adapt to light/dark
 const TYPE_CONFIG = {
-  research_run:      { color: 'var(--accent)',  icon: '🔬', label: 'Research',  nav: p => `/research?run_id=${p.run_id||''}` },
-  research_complete: { color: 'var(--accent)',  icon: '✅', label: 'Research',  nav: p => `/research?run_id=${p.run_id||''}` },
-  pdf_upload:        { color: '#8B5CF6',        icon: '📄', label: 'PDF',       nav: p => `/pdf-chat?session=${p.session_id||''}` },
-  news_search:       { color: '#F59E0B',        icon: '📰', label: 'News',      nav: p => `/news?topic=${encodeURIComponent(p.topic||'')}` },
-  news_summarize:    { color: '#F59E0B',        icon: '📊', label: 'News',      nav: p => `/news?topic=${encodeURIComponent(p.topic||'')}` },
-  workspace_created: { color: '#10B981',        icon: '📁', label: 'Workspace', nav: () => '/workspace' },
+  research_run:      { color: 'var(--agent-search)', icon: '🔬', label: 'Research',  nav: p => `/research?run_id=${p.run_id||''}` },
+  research_complete: { color: 'var(--success)',      icon: '✅', label: 'Research',  nav: p => `/research?run_id=${p.run_id||''}` },
+  pdf_upload:        { color: 'var(--agent-critic)', icon: '📄', label: 'PDF',       nav: p => `/pdf-chat?session=${p.session_id||''}` },
+  news_search:       { color: 'var(--agent-writer)', icon: '📰', label: 'News',      nav: p => `/news?topic=${encodeURIComponent(p.topic||'')}` },
+  news_summarize:    { color: 'var(--agent-writer)', icon: '📊', label: 'News',      nav: p => `/news?topic=${encodeURIComponent(p.topic||'')}` },
+  workspace_created: { color: 'var(--accent)',       icon: '📁', label: 'Workspace', nav: () => '/workspace' },
   // User-created events (from the new calendar_events backend). Color is
   // per-event (the user picks it in EventModal) — this entry is only the
   // fallback icon/label used before the per-event color is applied.
-  calendar_event:    { color: '#3B82F6',        icon: '🗓️', label: 'Event',     nav: () => null },
+  calendar_event:    { color: 'var(--accent)',       icon: '🗓️', label: 'Event',     nav: () => null },
 }
 
 function toDateKey(ts) {
@@ -91,7 +91,7 @@ function MonthStats({ byDate, year, month }) {
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           {[
             { label: 'Total events', value: totalEvents, color: 'var(--accent)' },
-            { label: 'Active days',  value: activeDays,  color: '#8B5CF6' },
+            { label: 'Active days',  value: activeDays,  color: 'var(--agent-critic)' },
           ].map(s => (
             <div key={s.label} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
               <span style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>{s.label}</span>

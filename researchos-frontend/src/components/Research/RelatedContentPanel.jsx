@@ -45,7 +45,7 @@ export const RelatedContentPanel = React.memo(function RelatedContentPanel({ run
       border: '1px solid var(--border)',
       borderRadius: 14, padding: '1rem',
     }}>
-      <p style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.1em', color: '#6366f1', marginBottom: 12 }}>
+      <p style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.1em', color: 'var(--accent)', marginBottom: 12 }}>
         Related Content
       </p>
 

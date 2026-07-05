@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { authApi } from '../services/authApi'
+import Logo from '../components/Logo'
 
 function passwordStrength(pw) {
   if (!pw) return { score: 0, label: '', color: '' }
@@ -11,10 +12,10 @@ function passwordStrength(pw) {
   if (/[A-Z]/.test(pw)) score++
   if (/[0-9]/.test(pw)) score++
   if (/[^A-Za-z0-9]/.test(pw)) score++
-  if (score <= 1) return { score, label: 'Weak',   color: '#ef4444' }
-  if (score <= 3) return { score, label: 'Fair',   color: '#f59e0b' }
-  if (score === 4) return { score, label: 'Good',  color: '#14b8a6' }
-  return               { score, label: 'Strong', color: '#22c55e' }
+  if (score <= 1) return { score, label: 'Weak',   color: 'var(--danger)' }
+  if (score <= 3) return { score, label: 'Fair',   color: 'var(--agent-writer)' }
+  if (score === 4) return { score, label: 'Good',  color: 'var(--agent-reader)' }
+  return               { score, label: 'Strong', color: 'var(--success)' }
 }
 
 export default function RegisterPage() {
@@ -63,14 +64,24 @@ export default function RegisterPage() {
   return (
     <div className="auth-page">
       <div className="auth-bg">
-        <div className="auth-bg-orb auth-bg-orb--1" />
-        <div className="auth-bg-orb auth-bg-orb--2" />
+        <div className="auth-bg-dots" />
         <div className="auth-bg-grid" />
       </div>
 
       <Link to="/" className="auth-logo">
-        <span className="auth-logo-mark">R</span>
-        <span className="auth-logo-text">ResearchOS</span>
+        <Logo
+          size={30}
+          wordmarkColor="var(--text-primary)"
+          hexColor="var(--text-faint)"
+          osTagColor="var(--accent)"
+          osTagTextColor="#fff"
+          colors={{
+            search: 'var(--agent-search)',
+            reader: 'var(--agent-reader)',
+            writer: 'var(--agent-writer)',
+            critic: 'var(--agent-critic)',
+          }}
+        />
       </Link>
 
       <div className="auth-card">
@@ -185,11 +196,11 @@ export default function RegisterPage() {
               {confirm && (
                 <span className="auth-match-icon">
                   {pwMatch ? (
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#22c55e" strokeWidth="2.5">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--success)" strokeWidth="2.5">
                       <polyline points="20 6 9 17 4 12"/>
                     </svg>
                   ) : (
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#ef4444" strokeWidth="2.5">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--danger)" strokeWidth="2.5">
                       <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
                     </svg>
                   )}

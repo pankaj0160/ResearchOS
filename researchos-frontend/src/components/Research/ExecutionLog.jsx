@@ -1,36 +1,59 @@
+/**
+ * ExecutionLog.jsx
+ * Location: src/components/Research/ExecutionLog.jsx
+ *
+ * Milestone + raw-event log shown beneath the pipeline. Previously
+ * hardcoded Tailwind slate/indigo classes. Rewritten to the app's CSS
+ * variable system, with milestones colored by which agent produced
+ * them (search/reader/writer/critic) instead of one flat indigo tone.
+ */
 import { memo, useMemo, useState } from 'react'
+
+const AGENT_COLOR = {
+  search: 'var(--agent-search)',
+  reader: 'var(--agent-reader)',
+  writer: 'var(--agent-writer)',
+  critic: 'var(--agent-critic)',
+  final:  'var(--accent)',
+  system: 'var(--text-muted)',
+}
 
 function ExecutionLog({ milestones, rawLogs, collapsedCount, isRunning }) {
   const [showDetails, setShowDetails] = useState(false)
   const visibleRawLogs = useMemo(() => rawLogs.slice(-250), [rawLogs])
 
   return (
-    <section className="rounded-xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
-      <div className="flex items-center justify-between gap-3 border-b border-slate-200 px-5 py-4 dark:border-slate-800">
+    <section style={{ borderRadius: 14, border: '1px solid var(--border)', background: 'var(--bg-card)', boxShadow: 'var(--shadow-sm)' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, borderBottom: '1px solid var(--border)', padding: '1rem 1.25rem' }}>
         <div>
-          <h2 className="text-lg font-semibold text-slate-950 dark:text-white">Logs</h2>
-          <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">Milestones by default. Raw events stay available when needed.</p>
+          <h2 style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 16.5, color: 'var(--text-primary)', margin: 0 }}>Logs</h2>
+          <p style={{ margin: '3px 0 0', fontSize: 12.5, color: 'var(--text-muted)' }}>Milestones by default. Raw events stay available when needed.</p>
         </div>
         <button
           type="button"
           onClick={() => setShowDetails((value) => !value)}
-          className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800 dark:focus:ring-offset-slate-950"
           aria-expanded={showDetails}
+          className="exec-log-toggle"
+          style={{
+            borderRadius: 8, border: '1px solid var(--border)', padding: '7px 13px',
+            fontSize: 12.5, fontWeight: 600, color: 'var(--text-secondary)',
+            background: 'var(--bg-inset)', cursor: 'pointer', transition: 'all 0.18s',
+          }}
         >
           {showDetails ? 'Hide Detailed Logs' : 'Show Detailed Logs'}
         </button>
       </div>
 
-      <div className="p-5">
-        <div className="space-y-2" aria-live="polite" aria-atomic="false">
+      <div style={{ padding: '1.25rem' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }} aria-live="polite" aria-atomic="false">
           {collapsedCount > 0 && (
-            <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-500 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-400">
+            <div style={{ borderRadius: 8, border: '1px solid var(--border)', background: 'var(--bg-inset)', padding: '8px 12px', fontSize: 13, color: 'var(--text-muted)' }}>
               {collapsedCount} older milestones collapsed
             </div>
           )}
 
           {milestones.length === 0 ? (
-            <div className="rounded-lg border border-dashed border-slate-300 px-4 py-6 text-center text-sm text-slate-500 dark:border-slate-700 dark:text-slate-400">
+            <div style={{ borderRadius: 8, border: '1px dashed var(--border-strong)', padding: '1.4rem 1rem', textAlign: 'center', fontSize: 13, color: 'var(--text-muted)' }}>
               Pipeline milestones will appear here.
             </div>
           ) : (
@@ -38,17 +61,25 @@ function ExecutionLog({ milestones, rawLogs, collapsedCount, isRunning }) {
           )}
 
           {isRunning && (
-            <div className="flex items-center gap-2 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-sm font-medium text-indigo-700 dark:border-indigo-900 dark:bg-indigo-950/40 dark:text-indigo-300">
-              <span className="h-2 w-2 animate-pulse rounded-full bg-current" />
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, borderRadius: 8, border: '1px solid var(--accent-border)', background: 'var(--accent-dim)', padding: '8px 12px', fontSize: 13, fontWeight: 600, color: 'var(--accent)' }}>
+              <span style={{ width: 7, height: 7, borderRadius: '50%', background: 'currentColor', animation: 'pulse-slow 1.4s ease-in-out infinite' }} />
               Pipeline running
             </div>
           )}
         </div>
 
         {showDetails && (
-          <div className="mt-4 h-[300px] overflow-y-auto rounded-lg border border-slate-200 bg-slate-950 p-3 font-mono text-xs text-slate-200 dark:border-slate-800" tabIndex={0} aria-label="Detailed execution logs">
+          <div
+            tabIndex={0}
+            aria-label="Detailed execution logs"
+            style={{
+              marginTop: 16, height: 300, overflowY: 'auto', borderRadius: 8,
+              border: '1px solid var(--border)', background: 'var(--bg-inset)',
+              padding: 12, fontFamily: 'var(--font-mono)', fontSize: 11.5, color: 'var(--text-secondary)',
+            }}
+          >
             {visibleRawLogs.length === 0 ? (
-              <p className="text-slate-500">No raw events yet.</p>
+              <p style={{ color: 'var(--text-muted)', margin: 0 }}>No raw events yet.</p>
             ) : (
               visibleRawLogs.map((log) => <RawLogLine key={log.id} log={log} />)
             )}
@@ -60,28 +91,36 @@ function ExecutionLog({ milestones, rawLogs, collapsedCount, isRunning }) {
 }
 
 function Milestone({ item }) {
-  const styles = {
-    running: 'border-indigo-200 bg-indigo-50 text-indigo-800 dark:border-indigo-900 dark:bg-indigo-950/40 dark:text-indigo-300',
-    done: 'border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-300',
-    error: 'border-rose-200 bg-rose-50 text-rose-800 dark:border-rose-900 dark:bg-rose-950/40 dark:text-rose-300',
-  }
+  const color = AGENT_COLOR[item.agent] || AGENT_COLOR.system
+  const isError = item.status === 'error'
+  const isRunning = item.status === 'running'
 
   return (
-    <div className={`flex items-center gap-3 rounded-lg border px-3 py-2 text-sm font-medium ${styles[item.status] || styles.done}`}>
-      <span className="flex h-5 w-5 items-center justify-center rounded-full bg-white/70 text-xs font-bold dark:bg-slate-950/60">
-        {item.status === 'error' ? '!' : item.status === 'running' ? '•' : '✓'}
+    <div style={{
+      display: 'flex', alignItems: 'center', gap: 10, borderRadius: 8,
+      border: `1px solid ${isError ? 'var(--danger)' : `color-mix(in srgb, ${color} 40%, transparent)`}`,
+      background: isError ? 'var(--danger-subtle)' : `color-mix(in srgb, ${color} 6%, transparent)`,
+      padding: '8px 12px', fontSize: 13, fontWeight: 600,
+      color: isError ? 'var(--danger)' : color,
+    }}>
+      <span style={{
+        width: 18, height: 18, borderRadius: '50%', flexShrink: 0,
+        background: 'var(--bg-card)', display: 'flex', alignItems: 'center', justifyContent: 'center',
+        fontSize: 10, fontWeight: 700,
+      }}>
+        {isError ? '!' : isRunning ? '•' : '✓'}
       </span>
-      <span>{item.label}</span>
+      <span style={{ color: 'var(--text-primary)', fontWeight: 500 }}>{item.label}</span>
     </div>
   )
 }
 
 function RawLogLine({ log }) {
   return (
-    <div className="grid grid-cols-[84px_84px_1fr] gap-2 border-b border-white/5 py-1 last:border-b-0">
-      <span className="uppercase text-slate-500">{log.agent || 'system'}</span>
-      <span className="uppercase text-slate-400">{log.type || 'event'}</span>
-      <span className="break-words text-slate-200">{log.msg || ''}</span>
+    <div style={{ display: 'grid', gridTemplateColumns: '84px 84px 1fr', gap: 8, borderBottom: '1px solid var(--border)', padding: '4px 0' }}>
+      <span style={{ textTransform: 'uppercase', color: 'var(--text-muted)' }}>{log.agent || 'system'}</span>
+      <span style={{ textTransform: 'uppercase', color: 'var(--text-faint)' }}>{log.type || 'event'}</span>
+      <span style={{ wordBreak: 'break-word', color: 'var(--text-secondary)' }}>{log.msg || ''}</span>
     </div>
   )
 }

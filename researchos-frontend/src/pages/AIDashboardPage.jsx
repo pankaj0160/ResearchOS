@@ -38,12 +38,12 @@ function formatRelative(ts) {
 }
 
 const EVENT_META = {
-  research_run:      { icon: '🔬', color: 'var(--accent)',  label: 'Research' },
-  research_complete: { icon: '✅', color: '#16a34a',        label: 'Research done' },
-  pdf_upload:        { icon: '📄', color: '#8B5CF6',        label: 'PDF uploaded' },
-  news_search:       { icon: '📰', color: '#F59E0B',        label: 'News' },
-  news_summarize:    { icon: '📊', color: '#F59E0B',        label: 'Summarized' },
-  workspace_created: { icon: '📁', color: 'var(--accent)',  label: 'Workspace' },
+  research_run:      { icon: '🔬', color: 'var(--agent-search)', label: 'Research' },
+  research_complete: { icon: '✅', color: 'var(--success)',     label: 'Research done' },
+  pdf_upload:        { icon: '📄', color: 'var(--agent-critic)', label: 'PDF uploaded' },
+  news_search:       { icon: '📰', color: 'var(--agent-writer)', label: 'News' },
+  news_summarize:    { icon: '📊', color: 'var(--agent-writer)', label: 'Summarized' },
+  workspace_created: { icon: '📁', color: 'var(--accent)',       label: 'Workspace' },
 }
 
 // ── Quick stat card ───────────────────────────────────────────────────────────
@@ -159,8 +159,8 @@ function QuickActions() {
   const navigate = useNavigate()
   const actions = [
     { icon: '🔬', label: 'New Research',  sub: 'AI-powered pipeline',  color: 'var(--accent)',  path: '/research' },
-    { icon: '📄', label: 'PDF Chat',      sub: 'Chat with documents',  color: '#8B5CF6',        path: '/pdf-chat' },
-    { icon: '📰', label: 'News Intel',    sub: 'AI news briefing',     color: '#F59E0B',        path: '/news' },
+    { icon: '📄', label: 'PDF Chat',      sub: 'Chat with documents',  color: 'var(--agent-critic)', path: '/pdf-chat' },
+    { icon: '📰', label: 'News Intel',    sub: 'AI news briefing',     color: 'var(--agent-writer)', path: '/news' },
     { icon: '📋', label: 'History',       sub: 'Past research',        color: 'var(--text-muted)', path: '/history' },
   ]
   return (
@@ -238,10 +238,9 @@ export default function AIDashboardPage() {
   return (
     <div className="page-container page-fade">
 
-      {/* Greeting hero — glow orbs + grid pattern, same visual language as the auth pages */}
+      {/* Greeting hero — dot-grain + grid pattern, same visual language as the auth pages */}
       <div className="dash-hero dash-stagger dash-stagger--1" style={{ marginBottom: '1.75rem' }}>
-        <div className="dash-hero-orb dash-hero-orb--accent" />
-        <div className="dash-hero-orb dash-hero-orb--gold" />
+        <div className="dash-hero-dots" />
         <div className="dash-hero-grid-pattern" />
 
         <div className="dash-hero-content" style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap' }}>
@@ -267,9 +266,9 @@ export default function AIDashboardPage() {
 
       {/* Stats row */}
       <div className="dash-stagger dash-stagger--3 dash-stats-grid" style={{ marginBottom: '1.5rem' }}>
-        <StatCard icon="🔬" label="Research runs"  value={stats.research} sub="recent sessions" color="var(--accent)" onClick={() => window.location.href='/history?tab=research'} />
-        <StatCard icon="📄" label="PDF sessions"   value={stats.pdfs}     sub="documents indexed" color="#8B5CF6" onClick={() => window.location.href='/pdf-chat'} />
-        <StatCard icon="📰" label="News topics"    value={stats.news}     sub="topics tracked" color="#F59E0B" onClick={() => window.location.href='/news'} />
+        <StatCard icon="🔬" label="Research runs"  value={stats.research} sub="recent sessions" color="var(--agent-search)" onClick={() => window.location.href='/history?tab=research'} />
+        <StatCard icon="📄" label="PDF sessions"   value={stats.pdfs}     sub="documents indexed" color="var(--agent-critic)" onClick={() => window.location.href='/pdf-chat'} />
+        <StatCard icon="📰" label="News topics"    value={stats.news}     sub="topics tracked" color="var(--agent-writer)" onClick={() => window.location.href='/news'} />
       </div>
 
       {/* Main grid — Weather / Headlines / Travel Safety.

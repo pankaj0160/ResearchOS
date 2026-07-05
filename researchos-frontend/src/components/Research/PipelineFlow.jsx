@@ -1,3 +1,14 @@
+/**
+ * PipelineFlow.jsx
+ * Location: src/components/Research/PipelineFlow.jsx
+ *
+ * The five-step pipeline timeline shown on the Research page while a
+ * run is in progress. Previously hardcoded Tailwind slate/indigo/emerald
+ * classes — the generic "AI product" look. Rewritten to use the app's
+ * real CSS-variable design system plus the four agent-color tokens, so
+ * each step's accent color matches its agent everywhere else in the app
+ * (Logo, Landing pipeline demo, etc).
+ */
 import { memo } from 'react'
 import { PIPELINE_STEPS } from '../../hooks/useSSEStream'
 
@@ -8,48 +19,82 @@ const STATUS_LABEL = {
   error: 'Error',
 }
 
+// One accent per step — matches the pipeline agent colors used everywhere else
+const STEP_COLOR = {
+  search: 'var(--agent-search)',
+  reader: 'var(--agent-reader)',
+  writer: 'var(--agent-writer)',
+  critic: 'var(--agent-critic)',
+  final:  'var(--accent)',
+}
+
 function PipelineFlow({ steps }) {
   const completeCount = PIPELINE_STEPS.filter((step) => steps[step.key]?.status === 'done').length
   const progress = Math.round((completeCount / PIPELINE_STEPS.length) * 100)
 
   return (
-    <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900" aria-label="Pipeline progress">
-      <div className="mb-5 flex items-center justify-between gap-3">
+    <section
+      aria-label="Pipeline progress"
+      style={{
+        borderRadius: 16,
+        border: '1px solid var(--border)',
+        background: 'var(--bg-card)',
+        boxShadow: 'var(--shadow-sm)',
+        padding: '1.35rem',
+      }}
+    >
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: '1.3rem' }}>
         <div>
-          <h2 className="text-xl font-semibold text-slate-950 dark:text-white">Pipeline Progress</h2>
-          <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">Real-time agent status timeline.</p>
+          <h2 style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 18, color: 'var(--text-primary)', margin: 0 }}>
+            Pipeline Progress
+          </h2>
+          <p style={{ margin: '2px 0 0', fontSize: 13, color: 'var(--text-muted)' }}>Real-time agent status timeline.</p>
         </div>
-        <span className="rounded-full bg-slate-100 px-3 py-1 text-sm font-semibold text-slate-700 dark:bg-slate-800 dark:text-slate-200">
+        <span style={{
+          borderRadius: 99, background: 'var(--bg-inset)', border: '1px solid var(--border)',
+          padding: '4px 12px', fontSize: 13, fontWeight: 700, color: 'var(--text-secondary)',
+          fontFamily: 'var(--font-mono)',
+        }}>
           {progress}%
         </span>
       </div>
 
-      <div className="mb-5 h-2 overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800">
-        <div className="h-full rounded-full bg-indigo-600 transition-all duration-500" style={{ width: `${progress}%` }} />
+      <div style={{ height: 6, borderRadius: 99, background: 'var(--bg-inset)', overflow: 'hidden', marginBottom: '1.3rem' }}>
+        <div style={{ height: '100%', width: `${progress}%`, background: 'var(--accent)', borderRadius: 99, transition: 'width 0.5s cubic-bezier(0.16,1,0.3,1)' }} />
       </div>
 
-      <ol className="grid gap-3 md:grid-cols-5">
+      <ol style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 10, listStyle: 'none', margin: 0, padding: 0 }} className="pipeline-flow-grid">
         {PIPELINE_STEPS.map((step, index) => {
           const state = steps[step.key] || { status: 'idle', message: step.waiting }
+          const color = STEP_COLOR[step.key] || 'var(--accent)'
+          const isRunning = state.status === 'running'
+          const isDone    = state.status === 'done'
+          const isError   = state.status === 'error'
+
           return (
-            <li key={step.key} className={`relative rounded-xl border p-4 transition ${
-              state.status === 'running'
-                ? 'border-indigo-300 bg-indigo-50 shadow-sm dark:border-indigo-900 dark:bg-indigo-950/40'
-                : state.status === 'done'
-                  ? 'border-emerald-200 bg-emerald-50 dark:border-emerald-900 dark:bg-emerald-950/30'
-                  : state.status === 'error'
-                    ? 'border-rose-200 bg-rose-50 dark:border-rose-900 dark:bg-rose-950/30'
-                    : 'border-slate-200 bg-slate-50 dark:border-slate-800 dark:bg-slate-950'
-            }`}>
-              <div className="mb-3 flex items-center justify-between">
-                <span className="flex h-8 w-8 items-center justify-center rounded-full bg-white text-sm font-bold text-slate-700 ring-1 ring-slate-200 dark:bg-slate-900 dark:text-slate-200 dark:ring-slate-700">
+            <li key={step.key} style={{
+              position: 'relative',
+              borderRadius: 12,
+              padding: '0.9rem',
+              border: `1.5px solid ${isRunning ? `color-mix(in srgb, ${color} 70%, transparent)` : isDone ? `color-mix(in srgb, ${color} 45%, transparent)` : isError ? 'var(--danger)' : 'var(--border)'}`,
+              background: isRunning ? `color-mix(in srgb, ${color} 12%, transparent)` : isDone ? `color-mix(in srgb, ${color} 6%, transparent)` : isError ? 'var(--danger-subtle)' : 'var(--bg-inset)',
+              transition: 'all 0.3s ease',
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+                <span style={{
+                  width: 26, height: 26, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  fontSize: 12, fontWeight: 700, background: 'var(--bg-card)', color: 'var(--text-secondary)',
+                  border: '1px solid var(--border)',
+                }}>
                   {index + 1}
                 </span>
-                <StatusIcon status={state.status} />
+                <StatusIcon status={state.status} color={color} />
               </div>
-              <h3 className="text-sm font-semibold text-slate-950 dark:text-white">{step.label}</h3>
-              <p className="mt-1 text-xs font-medium text-slate-500 dark:text-slate-400">{STATUS_LABEL[state.status] || 'Waiting'}</p>
-              <p className="mt-3 min-h-8 text-xs leading-5 text-slate-600 dark:text-slate-300">{state.message}</p>
+              <h3 style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)', margin: 0, fontFamily: 'var(--font-display)' }}>{step.label}</h3>
+              <p style={{ margin: '4px 0 0', fontSize: 11, fontWeight: 600, color: isRunning || isDone ? color : 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
+                {STATUS_LABEL[state.status] || 'Waiting'}
+              </p>
+              <p style={{ margin: '10px 0 0', minHeight: 32, fontSize: 11.5, lineHeight: 1.5, color: 'var(--text-secondary)' }}>{state.message}</p>
             </li>
           )
         })}
@@ -58,22 +103,30 @@ function PipelineFlow({ steps }) {
   )
 }
 
-function StatusIcon({ status }) {
+function StatusIcon({ status, color }) {
   if (status === 'done') {
-    return <span className="flex h-7 w-7 items-center justify-center rounded-full bg-emerald-600 text-[10px] font-bold text-white">OK</span>
-  }
-  if (status === 'error') {
-    return <span className="flex h-7 w-7 items-center justify-center rounded-full bg-rose-600 text-sm font-bold text-white">!</span>
-  }
-  if (status === 'running') {
     return (
-      <span className="relative flex h-7 w-7 items-center justify-center rounded-full bg-indigo-100 text-indigo-700 dark:bg-indigo-950 dark:text-indigo-300" aria-label="Running">
-        <span className="absolute h-7 w-7 animate-ping rounded-full bg-indigo-400/30" />
-        <span className="h-2.5 w-2.5 rounded-full bg-current" />
+      <span style={{ width: 22, height: 22, borderRadius: '50%', background: 'var(--success)', color: '#fff', fontSize: 10, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        ✓
       </span>
     )
   }
-  return <span className="h-7 w-7 rounded-full border border-slate-300 bg-white dark:border-slate-700 dark:bg-slate-900" />
+  if (status === 'error') {
+    return (
+      <span style={{ width: 22, height: 22, borderRadius: '50%', background: 'var(--danger)', color: '#fff', fontSize: 13, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        !
+      </span>
+    )
+  }
+  if (status === 'running') {
+    return (
+      <span style={{ position: 'relative', width: 22, height: 22, borderRadius: '50%', background: `color-mix(in srgb, ${color} 20%, transparent)`, color, display: 'flex', alignItems: 'center', justifyContent: 'center' }} aria-label="Running">
+        <span style={{ position: 'absolute', inset: 0, borderRadius: '50%', background: `color-mix(in srgb, ${color} 30%, transparent)`, animation: 'pipelinePing 1.4s cubic-bezier(0,0,0.2,1) infinite' }} />
+        <span style={{ width: 8, height: 8, borderRadius: '50%', background: 'currentColor', position: 'relative' }} />
+      </span>
+    )
+  }
+  return <span style={{ width: 22, height: 22, borderRadius: '50%', border: '1px solid var(--border)', background: 'var(--bg-card)' }} />
 }
 
 export default memo(PipelineFlow)

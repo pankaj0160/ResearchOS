@@ -96,6 +96,121 @@
   /* ── Layout ── */
   --sidebar-width: 232px;
   --sidebar-collapsed-width: 60px;
+
+  /* ── Pipeline agent colors — shared across Logo, pipeline visualizations,
+     agent status pills. One hue per agent, kept stable across themes;
+     only --bg/--text pairs shift for light/dark contrast elsewhere. ── */
+  --agent-search: #C6821F;
+  --agent-reader: #2F7A6C;
+  --agent-writer: #A8532A;
+  --agent-critic: #A3384A;
+}
+
+/* ── Dark mode: agent colors lifted slightly for legibility on dark surfaces ── */
+.dark {
+  --agent-search: #E2A33B;
+  --agent-reader: #4C9C8E;
+  --agent-writer: #C46A3B;
+  --agent-critic: #C1495A;
+}
+
+/* ── Theme rocker switch (ThemeToggle.jsx) ── */
+.theme-rocker {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  padding: 2px;
+  background: var(--bg-inset);
+  border: 1px solid var(--border);
+  cursor: pointer;
+  transition: background var(--duration-base), border-color var(--duration-base);
+  flex-shrink: 0;
+}
+.theme-rocker:hover { border-color: var(--border-strong); }
+.theme-rocker:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.theme-rocker-thumb {
+  width: 22px; height: 22px;
+  border-radius: 50%;
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  box-shadow: var(--shadow-sm);
+  display: flex; align-items: center; justify-content: center;
+  transition: transform var(--duration-slow) var(--ease-spring);
+}
+
+/* ── App navbar (Navbar.jsx) — in-app top bar, distinct from the
+   marketing site's own header ── */
+.app-navbar {
+  position: sticky; top: 0; z-index: 40;
+  background: color-mix(in srgb, var(--bg-surface) 88%, transparent);
+  backdrop-filter: blur(10px);
+  border-bottom: 1px solid var(--border);
+}
+.app-navbar-inner {
+  max-width: 1440px; margin: 0 auto;
+  height: 60px; padding: 0 1.25rem;
+  display: flex; align-items: center; gap: 1.5rem;
+}
+.app-navbar-brand { flex-shrink: 0; border-radius: var(--radius-sm); }
+.app-navbar-brand:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+
+.app-navbar-links {
+  display: flex; align-items: center; gap: 0.25rem;
+  margin-left: 0.5rem;
+}
+.app-navbar-link {
+  padding: 7px 12px;
+  border-radius: var(--radius-sm);
+  font-size: 13.5px; font-weight: 500;
+  color: var(--text-secondary);
+  transition: color var(--duration-base), background var(--duration-base);
+}
+.app-navbar-link:hover { color: var(--text-primary); background: var(--bg-card-hover); }
+.app-navbar-link--active { color: var(--accent); background: var(--accent-dim); font-weight: 600; }
+
+.app-navbar-actions { display: flex; align-items: center; gap: 0.6rem; margin-left: auto; }
+.app-navbar-actions--mobile { display: none; }
+
+.app-navbar-reset {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 7px 13px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  color: var(--text-secondary);
+  font-size: 13px; font-weight: 500;
+  transition: color var(--duration-base), border-color var(--duration-base), background var(--duration-base);
+}
+.app-navbar-reset:hover { color: var(--text-primary); border-color: var(--border-strong); background: var(--bg-card-hover); }
+.app-navbar-reset--compact { padding: 8px; }
+
+.app-navbar-menu-btn {
+  display: flex; align-items: center; justify-content: center;
+  width: 36px; height: 36px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  color: var(--text-primary);
+}
+
+.app-navbar-sheet {
+  display: flex; flex-direction: column;
+  border-top: 1px solid var(--border);
+  background: var(--bg-surface);
+  padding: 0.4rem 1rem 0.75rem;
+}
+.app-navbar-sheet-link {
+  padding: 12px 4px;
+  border-bottom: 1px solid var(--border);
+  font-size: 14.5px; font-weight: 500;
+  color: var(--text-secondary);
+}
+.app-navbar-sheet-link--active { color: var(--accent); font-weight: 600; }
+
+@media (max-width: 860px) {
+  .app-navbar-links { display: none; }
+  .app-navbar-actions { display: none; }
+  .app-navbar-actions--mobile { display: flex; }
 }
 
 /* ── Dark mode overrides — ResearchOS emerald/ochre dark palette ── */
@@ -218,7 +333,10 @@ a { text-decoration: none; color: inherit; }
   background: var(--bg-base);
 }
 
-/* Ambient background effects */
+/* Ambient background — quiet dot-grain instrument texture, same
+   language as the marketing site's hero. Previously two large blurred
+   glow orbs sat behind the grid here; that's the generic-AI-SaaS auth
+   page look, so it's gone in favor of the grid alone. */
 .auth-bg {
   position: fixed;
   inset: 0;
@@ -227,23 +345,14 @@ a { text-decoration: none; color: inherit; }
   z-index: 0;
 }
 
-.auth-bg-orb {
+.auth-bg-dots {
   position: absolute;
-  border-radius: 50%;
-  filter: blur(80px);
-  opacity: 0.35;
-}
-
-.auth-bg-orb--1 {
-  width: 500px; height: 500px;
-  top: -100px; right: -100px;
-  background: radial-gradient(circle, #0d948830, transparent 70%);
-}
-
-.auth-bg-orb--2 {
-  width: 400px; height: 400px;
-  bottom: -80px; left: -80px;
-  background: radial-gradient(circle, #14b8a620, transparent 70%);
+  inset: 0;
+  background-image: radial-gradient(var(--border-strong) 1px, transparent 1px);
+  background-size: 26px 26px;
+  opacity: 0.5;
+  -webkit-mask-image: radial-gradient(ellipse 75% 65% at 50% 40%, black 35%, transparent 85%);
+  mask-image: radial-gradient(ellipse 75% 65% at 50% 40%, black 35%, transparent 85%);
 }
 
 .auth-bg-grid {
@@ -267,33 +376,11 @@ a { text-decoration: none; color: inherit; }
   position: fixed;
   top: 1.5rem;
   left: 1.5rem;
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
   z-index: 10;
   text-decoration: none;
+  border-radius: var(--radius-sm);
 }
-
-.auth-logo-mark {
-  width: 30px; height: 30px;
-  background: var(--accent);
-  color: #fff;
-  border-radius: 8px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-family: var(--font-display);
-  font-weight: 700;
-  font-size: 15px;
-}
-
-.auth-logo-text {
-  font-family: var(--font-display);
-  font-weight: 700;
-  font-size: 15px;
-  color: var(--text-primary);
-  letter-spacing: -0.02em;
-}
+.auth-logo:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 
 /* Card */
 .auth-card {
@@ -378,8 +465,8 @@ a { text-decoration: none; color: inherit; }
   box-shadow: 0 0 0 3px var(--accent-dim);
 }
 
-.auth-input--valid  { border-color: #22c55e !important; }
-.auth-input--invalid { border-color: #ef4444 !important; }
+.auth-input--valid  { border-color: var(--success) !important; }
+.auth-input--invalid { border-color: var(--danger) !important; }
 
 .auth-input-wrap {
   position: relative;
@@ -443,18 +530,12 @@ a { text-decoration: none; color: inherit; }
   align-items: center;
   gap: 0.5rem;
   padding: 0.65rem 0.85rem;
-  background: #fef2f2;
-  border: 1px solid #fecaca;
+  background: var(--danger-subtle);
+  border: 1px solid color-mix(in srgb, var(--danger) 35%, transparent);
   border-radius: var(--radius-sm);
-  color: #dc2626;
+  color: var(--danger);
   font-size: 13px;
   line-height: 1.4;
-}
-
-.dark .auth-error {
-  background: #2d1212;
-  border-color: #7f1d1d;
-  color: #fca5a5;
 }
 
 .auth-error-icon { font-size: 12px; flex-shrink: 0; }
@@ -990,7 +1071,7 @@ a { text-decoration: none; color: inherit; }
   --bg-base-legacy:  #09090b;
   --bg-card-legacy:  #111113;
   --bg-hover:        #18181b;
-  --indigo:          #6366f1;
+  --indigo:          #A3384A; /* retired from blue-violet; kept as an alias so any legacy .bg-indigo/.text-indigo usage stays on-palette */
   --teal:            #14b8a6;
   --amber:           #f59e0b;
   --green:           #22c55e;
@@ -1016,6 +1097,21 @@ a { text-decoration: none; color: inherit; }
   90%  { opacity: 1; }
   100% { top: 100vh; opacity: 0; }
 }
+
+@keyframes pipelinePing {
+  0%   { transform: scale(1);   opacity: 1;   }
+  75%, 100% { transform: scale(1.9); opacity: 0; }
+}
+.pipeline-flow-grid { grid-template-columns: repeat(5, 1fr); }
+.exec-log-toggle:hover { color: var(--text-primary); border-color: var(--border-strong); background: var(--bg-card-hover); }
+.topic-input-secondary-btn:hover:not(:disabled) { background: var(--bg-card-hover); border-color: var(--border-strong); }
+.topic-suggestion-chip:hover { border-color: var(--accent-border); color: var(--accent); background: var(--accent-dim); }
+@media (max-width: 640px) {
+  .topic-input-form { flex-direction: column; }
+  .topic-input-form > * { width: 100%; }
+}
+@media (max-width: 900px) { .pipeline-flow-grid { grid-template-columns: repeat(2, 1fr) !important; } }
+@media (max-width: 480px) { .pipeline-flow-grid { grid-template-columns: 1fr !important; } }
 
 @keyframes pulse-slow {
   0%, 100% { opacity: 1; }
@@ -1053,7 +1149,7 @@ a { text-decoration: none; color: inherit; }
 .bg-green   { background-color: var(--green); }
 .text-indigo { color: var(--indigo); }
 .from-indigo { --tw-gradient-from: var(--indigo); }
-.via-indigo  { --tw-gradient-via: #818cf8; }
+.via-indigo  { --tw-gradient-via: #C1495A; }
 .to-teal     { --tw-gradient-to: var(--teal); }
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -2444,9 +2540,11 @@ a { text-decoration: none; color: inherit; }
 
 
 /* ── Hero greeting header ──
-   Reuses the same glow-orb + grid-pattern language as .auth-bg-orb /
+   Reuses the same dot-grain + grid-pattern language as .auth-bg-dots /
    .auth-bg-grid so the dashboard's first impression matches the login
-   page's premium feel instead of looking like a plain text header. */
+   page's premium feel instead of looking like a plain text header.
+   Previously used two blurred glow orbs here — replaced along with the
+   auth pages' matching orbs, since that's the generic-AI-SaaS look. */
 .dash-hero {
   position: relative;
   overflow: hidden;
@@ -2456,23 +2554,15 @@ a { text-decoration: none; color: inherit; }
   padding: 1.75rem 2rem;
 }
 
-.dash-hero-orb {
+.dash-hero-dots {
   position: absolute;
-  border-radius: 50%;
-  filter: blur(70px);
+  inset: 0;
   pointer-events: none;
+  background-image: radial-gradient(var(--border-strong) 1px, transparent 1px);
+  background-size: 24px 24px;
   opacity: 0.5;
-}
-.dash-hero-orb--accent {
-  width: 320px; height: 320px;
-  top: -140px; right: -80px;
-  background: radial-gradient(circle, var(--accent) 0%, transparent 70%);
-}
-.dash-hero-orb--gold {
-  width: 260px; height: 260px;
-  bottom: -140px; left: 10%;
-  background: radial-gradient(circle, var(--gold) 0%, transparent 70%);
-  opacity: 0.3;
+  -webkit-mask-image: radial-gradient(ellipse 70% 100% at 30% 0%, black 30%, transparent 85%);
+  mask-image: radial-gradient(ellipse 70% 100% at 30% 0%, black 30%, transparent 85%);
 }
 
 .dash-hero-grid-pattern {

@@ -29,16 +29,16 @@ export function TrackedTopicsSidebar({ onSelectTopic }) {
       borderRadius: 14, padding: '1rem',
       minWidth: 0,
     }}>
-      <p style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.1em', color: '#fbbf24', marginBottom: 10 }}>
+      <p style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.1em', color: 'var(--agent-writer)', marginBottom: 10 }}>
         Tracked Topics
       </p>
 
       {loading && (
-        <div style={{ fontSize: 12, color: '#52525b' }}>Loading…</div>
+        <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>Loading…</div>
       )}
 
       {!loading && topics.length === 0 && (
-        <p style={{ fontSize: 12, color: '#52525b', lineHeight: 1.6 }}>
+        <p style={{ fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.6 }}>
           No tracked topics yet. Search for a topic and click "📌 Track this topic".
         </p>
       )}
@@ -55,10 +55,10 @@ export function TrackedTopicsSidebar({ onSelectTopic }) {
         >
           <span style={{ fontSize: 14, flexShrink: 0 }}>📰</span>
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: 13, color: '#fafafa', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            <div style={{ fontSize: 13, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
               {t.topic}
             </div>
-            <div style={{ fontSize: 10, color: '#71717a' }}>{t.category}</div>
+            <div style={{ fontSize: 10, color: 'var(--text-faint)' }}>{t.category}</div>
           </div>
           <button
             onClick={(e) => handleRemove(e, t.id)}
@@ -66,7 +66,7 @@ export function TrackedTopicsSidebar({ onSelectTopic }) {
             title="Untrack"
             style={{
               background: 'none', border: 'none', cursor: 'pointer',
-              color: '#52525b', fontSize: 14, flexShrink: 0, padding: '2px',
+              color: 'var(--text-muted)', fontSize: 14, flexShrink: 0, padding: '2px',
               opacity: removing === t.id ? 0.4 : 1,
             }}
           >✕</button>

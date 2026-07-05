@@ -1,67 +1,115 @@
+/**
+ * Navbar.jsx
+ * Location: src/components/Navbar.jsx
+ *
+ * In-app top bar (shown once a user is inside a workspace/module).
+ * Previously: hardcoded Tailwind slate/indigo classes, disconnected
+ * from the rest of the app's CSS-variable design system, plus the old
+ * four-square "OrchestrAI" logo.
+ *
+ * Now: pulls every color from the existing var(--...) system in
+ * index.css (so it automatically matches Dashboard/PDF/RAG/etc and
+ * reacts to the theme rocker instantly), uses the new <Logo /> mark,
+ * and adds the small interaction details — active state, focus rings,
+ * a proper mobile sheet instead of nothing.
+ */
 import { memo, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useLocation } from 'react-router-dom'
+import { Plus, Menu, X } from 'lucide-react'
 import ThemeToggle from './ThemeToggle'
+import Logo from './Logo'
+
+const NAV_LINKS = [
+  { to: '/research', label: 'Research' },
+  { to: '/pdf-chat', label: 'PDF Chat' },
+  { to: '/news', label: 'News' },
+  { to: '/dashboard', label: 'Dashboard' },
+  { to: '/calendar', label: 'Calendar' },
+]
 
 function Navbar({ onReset }) {
   const [menuOpen, setMenuOpen] = useState(false)
+  const location = useLocation()
 
   return (
-    <header className="sticky top-0 z-30 border-b border-slate-200 bg-white/90 backdrop-blur dark:border-slate-800 dark:bg-slate-950/90">
-      <div className="mx-auto flex h-14 max-w-7xl items-center gap-3 px-4 sm:h-16 sm:px-6 lg:px-8">
+    <header className="app-navbar">
+      <div className="app-navbar-inner">
 
-        {/* Logo */}
-        <Link
-          to="/research"
-          className="flex items-center gap-2.5 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 dark:focus:ring-offset-slate-950 shrink-0"
-          aria-label="OrchestrAI dashboard"
-        >
-          <span className="grid h-8 w-8 grid-cols-2 gap-0.5 rounded-lg bg-slate-950 p-1.5 dark:bg-white sm:h-9 sm:w-9">
-            <span className="rounded-sm bg-amber-400" />
-            <span className="rounded-sm bg-teal-400" />
-            <span className="rounded-sm bg-indigo-400" />
-            <span className="rounded-sm bg-emerald-400" />
-          </span>
-          <span>
-            <span className="block text-sm font-bold tracking-tight text-slate-950 dark:text-white sm:text-base">
-              OrchestrAI
-            </span>
-            {/* Hide subtitle on very small screens */}
-            <span className="hidden text-xs text-slate-500 dark:text-slate-400 sm:block">
-              Research Pipeline
-            </span>
-          </span>
+        <Link to="/research" className="app-navbar-brand" aria-label="ResearchOS home">
+          <Logo
+            size={30}
+            wordmarkColor="var(--text-primary)"
+            hexColor="var(--text-faint)"
+            osTagColor="var(--accent)"
+            osTagTextColor="var(--bg-base)"
+            colors={{
+              search: 'var(--agent-search)',
+              reader: 'var(--agent-reader)',
+              writer: 'var(--agent-writer)',
+              critic: 'var(--agent-critic)',
+            }}
+          />
         </Link>
 
-        {/* Desktop right side */}
-        <div className="ml-auto hidden items-center gap-3 sm:flex">
-          {onReset && (
-            <button
-              type="button"
-              onClick={onReset}
-              className="rounded-lg px-3 py-2 text-sm font-medium text-slate-600 transition hover:bg-slate-100 hover:text-slate-950 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-white dark:focus:ring-offset-slate-950"
+        {/* Desktop links */}
+        <nav className="app-navbar-links" aria-label="Primary">
+          {NAV_LINKS.map(link => (
+            <Link
+              key={link.to}
+              to={link.to}
+              className={`app-navbar-link${location.pathname.startsWith(link.to) ? ' app-navbar-link--active' : ''}`}
             >
+              {link.label}
+            </Link>
+          ))}
+        </nav>
+
+        {/* Desktop right side */}
+        <div className="app-navbar-actions">
+          {onReset && (
+            <button type="button" onClick={onReset} className="app-navbar-reset">
+              <Plus size={15} strokeWidth={2.25} />
               New Research
             </button>
           )}
           <ThemeToggle />
         </div>
 
-        {/* Mobile right side — compact */}
-        <div className="ml-auto flex items-center gap-2 sm:hidden">
+        {/* Mobile right side */}
+        <div className="app-navbar-actions app-navbar-actions--mobile">
           {onReset && (
-            <button
-              type="button"
-              onClick={onReset}
-              className="rounded-lg px-2.5 py-1.5 text-xs font-medium text-slate-600 transition hover:bg-slate-100 hover:text-slate-950 focus:outline-none dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-white"
-            >
-              New
+            <button type="button" onClick={onReset} className="app-navbar-reset app-navbar-reset--compact" aria-label="New research">
+              <Plus size={16} strokeWidth={2.25} />
             </button>
           )}
-          {/* Mobile theme toggle — icon only */}
           <ThemeToggle iconOnly />
+          <button
+            type="button"
+            className="app-navbar-menu-btn"
+            onClick={() => setMenuOpen(v => !v)}
+            aria-label={menuOpen ? 'Close menu' : 'Open menu'}
+            aria-expanded={menuOpen}
+          >
+            {menuOpen ? <X size={20} /> : <Menu size={20} />}
+          </button>
         </div>
-
       </div>
+
+      {/* Mobile sheet */}
+      {menuOpen && (
+        <nav className="app-navbar-sheet" aria-label="Primary mobile">
+          {NAV_LINKS.map(link => (
+            <Link
+              key={link.to}
+              to={link.to}
+              onClick={() => setMenuOpen(false)}
+              className={`app-navbar-sheet-link${location.pathname.startsWith(link.to) ? ' app-navbar-sheet-link--active' : ''}`}
+            >
+              {link.label}
+            </Link>
+          ))}
+        </nav>
+      )}
     </header>
   )
 }

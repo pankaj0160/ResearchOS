@@ -21,6 +21,21 @@ TOKEN MODEL:
                   it is revoked and a new one is issued. A leaked refresh token
                   that gets replayed after the legitimate client already used
                   it will be rejected (see routers/auth_router.py::refresh).
+
+FIX (this version):
+  get_current_user() previously called database.get_user_by_id() — a SYNC
+  function that opens a brand-new psycopg2 connection to Supabase on every
+  single call. Since get_current_user runs on EVERY authenticated request
+  and this call was never wrapped in run_in_executor, it blocked the whole
+  asyncio event loop for the duration of that connection (TCP + SSL handshake
+  + query, over a real network round trip). With a single uvicorn worker,
+  every other in-flight request queued up behind it — this is what caused
+  the escalating multi-second delays across /api/auth/me, /api/activity,
+  /api/workspaces, /api/history/recent, and /api/dashboard/* seen in testing.
+
+  Fix: use database.get_user_by_id_async(), which reuses the shared,
+  already-warm asyncpg connection pool set up at startup instead of opening
+  a fresh connection per request. No other behavior changes.
 """
 
 from __future__ import annotations
@@ -162,7 +177,10 @@ async def get_current_user(
     if not user_id:
         raise _CREDENTIALS_EXCEPTION
 
-    user = database.get_user_by_id(int(user_id))
+    # FIX: was database.get_user_by_id(int(user_id)) — a blocking sync call
+    # that opened a fresh psycopg2 connection on every request and stalled
+    # the whole event loop. Now uses the async, pooled lookup instead.
+    user = await database.get_user_by_id_async(int(user_id))
     if not user:
         raise _CREDENTIALS_EXCEPTION
 

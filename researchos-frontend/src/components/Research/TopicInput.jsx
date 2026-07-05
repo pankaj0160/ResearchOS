@@ -1,3 +1,13 @@
+/**
+ * TopicInput.jsx
+ * Location: src/components/Research/TopicInput.jsx
+ *
+ * The primary interaction on the Research page — where a topic gets
+ * typed in and the pipeline launched. Previously a plain Tailwind
+ * slate/indigo form (the generic "AI SaaS input box" look). Rewritten
+ * to the app's real design system, with focus/hover states tied to
+ * --accent instead of a hardcoded indigo ring.
+ */
 import { memo, useCallback, useState } from 'react'
 
 const SUGGESTIONS = [
@@ -9,6 +19,7 @@ const SUGGESTIONS = [
 
 function TopicInput({ onStart, onClear, isRunning, canRetry, onRetry, currentTopic }) {
   const [topic, setTopic] = useState('')
+  const [focused, setFocused] = useState(false)
 
   const submit = useCallback((event) => {
     event.preventDefault()
@@ -22,41 +33,73 @@ function TopicInput({ onStart, onClear, isRunning, canRetry, onRetry, currentTop
   }, [onClear])
 
   return (
-    <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-      <div className="mb-5 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+    <section style={{ borderRadius: 16, border: '1px solid var(--border)', background: 'var(--bg-card)', boxShadow: 'var(--shadow-sm)', padding: '1.35rem' }}>
+      <div className="topic-input-head" style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'flex-end', justifyContent: 'space-between', marginBottom: '1.25rem' }}>
         <div>
-          <h2 className="text-xl font-semibold text-slate-950 dark:text-white">Research Card</h2>
-          <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">Enter a topic and launch the multi-agent pipeline.</p>
+          <h2 style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 18, color: 'var(--text-primary)', margin: 0 }}>Research Card</h2>
+          <p style={{ margin: '3px 0 0', fontSize: 13, color: 'var(--text-muted)' }}>Enter a topic and launch the multi-agent pipeline.</p>
         </div>
         {currentTopic && (
-          <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+          <span style={{ borderRadius: 99, background: 'var(--bg-inset)', border: '1px solid var(--border)', padding: '4px 12px', fontSize: 11.5, fontWeight: 600, color: 'var(--text-secondary)' }}>
             Current: {currentTopic}
           </span>
         )}
       </div>
 
-      <form onSubmit={submit} className="flex flex-col gap-3 lg:flex-row">
+      <form onSubmit={submit} className="topic-input-form" style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
         <label className="sr-only" htmlFor="topic">Research topic</label>
         <input
           id="topic"
           value={topic}
           onChange={(event) => setTopic(event.target.value)}
+          onFocus={() => setFocused(true)}
+          onBlur={() => setFocused(false)}
           disabled={isRunning}
           placeholder="Enter a research topic..."
-          className="min-h-12 flex-1 rounded-xl border border-slate-300 bg-white px-4 text-base text-slate-950 outline-none transition placeholder:text-slate-400 focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/15 disabled:cursor-not-allowed disabled:bg-slate-100 dark:border-slate-700 dark:bg-slate-950 dark:text-white dark:placeholder:text-slate-500 dark:disabled:bg-slate-800"
+          style={{
+            flex: '1 1 240px',
+            minHeight: 46,
+            borderRadius: 10,
+            border: `1.5px solid ${focused ? 'var(--accent)' : 'var(--border)'}`,
+            boxShadow: focused ? '0 0 0 4px var(--accent-dim)' : 'none',
+            background: isRunning ? 'var(--bg-inset)' : 'var(--bg-base)',
+            padding: '0 16px',
+            fontSize: 15,
+            color: 'var(--text-primary)',
+            outline: 'none',
+            fontFamily: 'var(--font-body)',
+            transition: 'border-color 0.18s, box-shadow 0.18s',
+          }}
         />
         <button
           type="submit"
           disabled={!topic.trim() || isRunning}
-          className="min-h-12 rounded-xl bg-indigo-600 px-6 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:bg-slate-300 dark:focus:ring-offset-slate-950 dark:disabled:bg-slate-700"
+          style={{
+            minHeight: 46, borderRadius: 10, padding: '0 22px',
+            fontSize: 14, fontWeight: 700, fontFamily: 'var(--font-display)',
+            color: !topic.trim() || isRunning ? 'var(--text-faint)' : '#fff',
+            background: !topic.trim() || isRunning ? 'var(--bg-inset)' : 'var(--accent)',
+            border: 'none', cursor: !topic.trim() || isRunning ? 'not-allowed' : 'pointer',
+            transition: 'filter 0.15s',
+          }}
+          onMouseEnter={e => { if (!e.target.disabled) e.currentTarget.style.filter = 'brightness(1.08)' }}
+          onMouseLeave={e => { e.currentTarget.style.filter = 'none' }}
         >
-          {isRunning ? 'Running' : 'Start Research'}
+          {isRunning ? 'Running…' : 'Start Research'}
         </button>
         <button
           type="button"
           onClick={clear}
           disabled={isRunning && !currentTopic}
-          className="min-h-12 rounded-xl border border-slate-300 px-5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800 dark:focus:ring-offset-slate-950"
+          className="topic-input-secondary-btn"
+          style={{
+            minHeight: 46, borderRadius: 10, padding: '0 20px',
+            fontSize: 14, fontWeight: 600, fontFamily: 'var(--font-display)',
+            color: 'var(--text-secondary)', background: 'transparent',
+            border: '1.5px solid var(--border)',
+            cursor: isRunning && !currentTopic ? 'not-allowed' : 'pointer',
+            opacity: isRunning && !currentTopic ? 0.5 : 1,
+          }}
         >
           Clear
         </button>
@@ -64,7 +107,12 @@ function TopicInput({ onStart, onClear, isRunning, canRetry, onRetry, currentTop
           <button
             type="button"
             onClick={onRetry}
-            className="min-h-12 rounded-xl border border-rose-300 px-5 text-sm font-semibold text-rose-700 transition hover:bg-rose-50 focus:outline-none focus:ring-2 focus:ring-rose-500 focus:ring-offset-2 dark:border-rose-800 dark:text-rose-300 dark:hover:bg-rose-950/40 dark:focus:ring-offset-slate-950"
+            style={{
+              minHeight: 46, borderRadius: 10, padding: '0 20px',
+              fontSize: 14, fontWeight: 600, fontFamily: 'var(--font-display)',
+              color: 'var(--danger)', background: 'var(--danger-subtle)',
+              border: '1.5px solid var(--danger)', cursor: 'pointer',
+            }}
           >
             Retry
           </button>
@@ -72,13 +120,18 @@ function TopicInput({ onStart, onClear, isRunning, canRetry, onRetry, currentTop
       </form>
 
       {!isRunning && !topic && (
-        <div className="mt-4 flex flex-wrap gap-2">
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 14 }}>
           {SUGGESTIONS.map((suggestion) => (
             <button
               key={suggestion}
               type="button"
               onClick={() => setTopic(suggestion)}
-              className="rounded-full border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-600 transition hover:border-indigo-300 hover:text-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 dark:border-slate-700 dark:text-slate-300 dark:hover:border-indigo-700 dark:hover:text-indigo-300"
+              className="topic-suggestion-chip"
+              style={{
+                borderRadius: 99, border: '1px solid var(--border)', padding: '6px 13px',
+                fontSize: 12, fontWeight: 500, color: 'var(--text-secondary)',
+                background: 'var(--bg-inset)', cursor: 'pointer', transition: 'all 0.18s',
+              }}
             >
               {suggestion}
             </button>

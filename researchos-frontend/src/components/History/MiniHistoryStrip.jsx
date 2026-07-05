@@ -18,21 +18,21 @@ import { apiClient } from '../../services/apiClient'
 const FEATURE_CONFIG = {
   research: {
     label:    'Recent Research',
-    color:    'var(--accent)',
+    color:    'var(--agent-search)',
     getTitle: r => r.title || r.topic || 'Untitled',
     getUrl:   r => `/research?run_id=${r.id}`,
     getMeta:  r => r.score ? `Score ${r.score}/10` : r.word_count ? `${r.word_count}w` : '',
   },
   pdf: {
     label:    'Recent PDFs',
-    color:    '#8B5CF6',
+    color:    'var(--agent-critic)',
     getTitle: s => s.filename || s.title || 'Untitled',
     getUrl:   s => `/pdf-chat?session=${s.id || s.session_id}`,
     getMeta:  s => s.page_count ? `${s.page_count} pages` : '',
   },
   news: {
     label:    'Tracked Topics',
-    color:    '#F59E0B',
+    color:    'var(--agent-writer)',
     getTitle: t => t.title || t.topic || 'Untitled',
     getUrl:   t => `/news?topic=${encodeURIComponent(t.title || t.topic || '')}`,
     getMeta:  t => t.category || '',

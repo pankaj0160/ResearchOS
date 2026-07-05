@@ -42,9 +42,9 @@ function formatDate(ts) {
 }
 
 const TYPE_META = {
-  research: { label: 'Research', Icon: SearchIcon,  color: 'var(--accent)' },
-  rag:      { label: 'PDF Chat', Icon: FileIcon,     color: '#8B5CF6' },
-  news:     { label: 'News',     Icon: NewsIcon,     color: '#F59E0B' },
+  research: { label: 'Research', Icon: SearchIcon,  color: 'var(--agent-search)' },
+  rag:      { label: 'PDF Chat', Icon: FileIcon,     color: 'var(--agent-critic)' },
+  news:     { label: 'News',     Icon: NewsIcon,     color: 'var(--agent-writer)' },
 }
 
 const TABS = [
@@ -236,7 +236,7 @@ export default function HistoryPage() {
       return (
         <div className="history-detail-body">
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: '1.5rem' }}>
-            <div style={{ width: 48, height: 48, background: '#EDE9FE', color: '#8B5CF6', borderRadius: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 22 }}>📄</div>
+            <div style={{ width: 48, height: 48, background: 'color-mix(in srgb, var(--agent-critic) 14%, transparent)', color: 'var(--agent-critic)', borderRadius: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 22 }}>📄</div>
             <div>
               <div style={{ fontFamily: 'var(--font-display)', fontSize: '1.1rem', fontWeight: 700, color: 'var(--text-primary)', letterSpacing: '-0.02em' }}>{s.title}</div>
               <div style={{ fontSize: 12, color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', marginTop: 2 }}>

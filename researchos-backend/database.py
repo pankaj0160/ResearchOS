@@ -24,6 +24,16 @@ Tables:
   rag_sessions        — PDF upload metadata and processing status
   calendar_events     — user-created calendar events (deadlines, reminders, meetings)
   refresh_tokens      — hashed, revocable refresh tokens (session management)
+
+FIX (this version):
+  Added get_user_by_id_async(). auth.py's get_current_user runs on every
+  authenticated request and was calling the SYNC get_user_by_id(), which
+  opens a brand-new psycopg2 connection per call and blocks the asyncio
+  event loop for its whole duration. That single blocking call was the
+  root cause of the escalating request delays seen across every protected
+  route (/api/auth/me, /api/activity, /api/workspaces, /api/history/recent,
+  /api/dashboard/*). get_user_by_id_async() reuses the shared, already-warm
+  asyncpg pool instead, exactly like get_user_full_async() below it does.
 """
 
 from __future__ import annotations
@@ -931,10 +941,35 @@ def get_user_by_username(username: str) -> dict | None:
 
 
 def get_user_by_id(user_id: int) -> dict | None:
+    """
+    Sync fallback — opens a fresh connection per call. Do NOT call this
+    directly from an async route/dependency; use get_user_by_id_async()
+    instead so the shared connection pool is used and the event loop is
+    never blocked. This sync version still exists for local SQLite dev
+    mode and for get_user_by_id_async() to fall back to when no pool
+    has been set up yet.
+    """
     with _conn() as con:
         cur = con.cursor()
         cur.execute(_q("SELECT * FROM users WHERE id = ?"), (user_id,))
         return _fetchone(cur)
+
+
+async def get_user_by_id_async(user_id: int) -> dict | None:
+    """
+    Async, non-blocking version of get_user_by_id().
+
+    THIS IS THE FUNCTION get_current_user() IN auth.py MUST CALL.
+    It runs on every single authenticated request, so it must reuse the
+    shared, already-warm asyncpg pool (set up once at startup) instead of
+    opening a brand-new psycopg2 connection per call — which would block
+    the entire asyncio event loop for every other in-flight request.
+    """
+    if not _async_pool:
+        return get_user_by_id(user_id)
+    async with _async_pool.acquire() as conn:
+        row = await conn.fetchrow("SELECT * FROM users WHERE id = $1", user_id)
+    return dict(row) if row else None
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

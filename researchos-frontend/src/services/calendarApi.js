@@ -41,10 +41,10 @@ export const calendarApi = {
    * @param {number|null} [event.endTime] - unix seconds; null = point-in-time event
    * @param {string} [event.description]
    * @param {boolean} [event.allDay]
-   * @param {string} [event.color] - hex color, e.g. "#3B82F6"
+   * @param {string} [event.color] - hex color, e.g. "#10B981"
    * @param {number|null} [event.workspaceId]
    */
-  create: ({ title, startTime, endTime = null, description = '', allDay = false, color = '#3B82F6', workspaceId = null }) =>
+  create: ({ title, startTime, endTime = null, description = '', allDay = false, color = '#10B981', workspaceId = null }) =>
     apiClient.post('/api/calendar/events', {
       body: {
         title,

@@ -5,31 +5,31 @@ import { activityApi } from '../../services/activityApi'
 // Metadata for each event type — icon, label, colour, URL builder
 const EVENT_META = {
   research_run: {
-    icon: '🔬', label: 'Researched', color: '#818cf8',
+    icon: '🔬', label: 'Researched', color: 'var(--agent-search)',
     url: (p) => p.run_id ? `/research?run_id=${p.run_id}` : '/research',
     title: (p) => p.topic || 'Research run',
     meta: (p) => p.word_count ? `${p.word_count.toLocaleString()} words` : null,
   },
   pdf_upload: {
-    icon: '📄', label: 'Uploaded PDF', color: '#2dd4bf',
+    icon: '📄', label: 'Uploaded PDF', color: 'var(--agent-reader)',
     url: (p) => p.session_id ? `/pdf-chat?session=${p.session_id}` : '/pdf-chat',
     title: (p) => p.filename || 'PDF document',
     meta: () => null,
   },
   text_ingested: {
-    icon: '💾', label: 'Saved as doc', color: '#4ade80',
+    icon: '💾', label: 'Saved as doc', color: 'var(--success)',
     url: (p) => p.session_id ? `/pdf-chat?session=${p.session_id}` : '/pdf-chat',
     title: (p) => p.title || 'Saved document',
     meta: () => null,
   },
   news_search: {
-    icon: '📰', label: 'Searched news', color: '#fbbf24',
+    icon: '📰', label: 'Searched news', color: 'var(--agent-writer)',
     url: (p) => `/news?topic=${encodeURIComponent(p.topic || '')}&category=${p.category || 'general'}`,
     title: (p) => p.topic || 'News search',
     meta: (p) => p.article_count ? `${p.article_count} articles` : null,
   },
   workspace_created: {
-    icon: '📁', label: 'Created workspace', color: '#c084fc',
+    icon: '📁', label: 'Created workspace', color: 'var(--agent-critic)',
     url: (p) => p.workspace_id ? `/workspace/${p.workspace_id}` : '/',
     title: (p) => p.name || 'New workspace',
     meta: (p) => p.topic || null,
@@ -37,7 +37,7 @@ const EVENT_META = {
 }
 
 const DEFAULT_META = {
-  icon: '⚡', label: 'Activity', color: '#71717a',
+  icon: '⚡', label: 'Activity', color: 'var(--text-muted)',
   url: () => '/',
   title: (p, type) => type,
   meta: () => null,
