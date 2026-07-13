@@ -24,16 +24,6 @@ Tables:
   rag_sessions        — PDF upload metadata and processing status
   calendar_events     — user-created calendar events (deadlines, reminders, meetings)
   refresh_tokens      — hashed, revocable refresh tokens (session management)
-
-FIX (this version):
-  Added get_user_by_id_async(). auth.py's get_current_user runs on every
-  authenticated request and was calling the SYNC get_user_by_id(), which
-  opens a brand-new psycopg2 connection per call and blocks the asyncio
-  event loop for its whole duration. That single blocking call was the
-  root cause of the escalating request delays seen across every protected
-  route (/api/auth/me, /api/activity, /api/workspaces, /api/history/recent,
-  /api/dashboard/*). get_user_by_id_async() reuses the shared, already-warm
-  asyncpg pool instead, exactly like get_user_full_async() below it does.
 """
 
 from __future__ import annotations
@@ -131,7 +121,25 @@ _PG_SCHEMA = [
         workspace_id INTEGER,
         word_count   INTEGER NOT NULL DEFAULT 0,
         source_count INTEGER NOT NULL DEFAULT 0,
+        share_token  TEXT,
+        is_public    INTEGER NOT NULL DEFAULT 0,
+        sources_json TEXT,
         created_at   REAL    NOT NULL
+    )
+    """,
+
+    # ── Follow-up conversation threads ──────────────────────────────────────────
+    # Each research run can have a follow-up Q&A thread attached — lets the user
+    # ask questions about the report without re-running the whole 4-agent
+    # pipeline. Answered from the report + sources already gathered, plus
+    # prior turns in this same thread (see agents.py's answer_followup()).
+    """
+    CREATE TABLE IF NOT EXISTS run_followups (
+        id         SERIAL  PRIMARY KEY,
+        run_id     INTEGER NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+        role       TEXT    NOT NULL,
+        content    TEXT    NOT NULL,
+        created_at REAL    NOT NULL
     )
     """,
 
@@ -273,6 +281,10 @@ _PG_MIGRATIONS = [
     "ALTER TABLE runs          ADD COLUMN IF NOT EXISTS workspace_id  INTEGER",
     "ALTER TABLE runs          ADD COLUMN IF NOT EXISTS word_count    INTEGER NOT NULL DEFAULT 0",
     "ALTER TABLE runs          ADD COLUMN IF NOT EXISTS source_count  INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE runs          ADD COLUMN IF NOT EXISTS share_token   TEXT",
+    "ALTER TABLE runs          ADD COLUMN IF NOT EXISTS is_public     INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE runs          ADD COLUMN IF NOT EXISTS sources_json  TEXT",
+    "CREATE UNIQUE INDEX IF NOT EXISTS idx_runs_share_token ON runs(share_token) WHERE share_token IS NOT NULL",
     "ALTER TABLE workspaces    ADD COLUMN IF NOT EXISTS updated_at    REAL",
     "ALTER TABLE rag_sessions  ADD COLUMN IF NOT EXISTS workspace_id  INTEGER",
     "ALTER TABLE rag_sessions  ADD COLUMN IF NOT EXISTS error_msg     TEXT",
@@ -302,7 +314,17 @@ CREATE TABLE IF NOT EXISTS runs (
     workspace_id INTEGER,
     word_count   INTEGER NOT NULL DEFAULT 0,
     source_count INTEGER NOT NULL DEFAULT 0,
+    share_token  TEXT,
+    is_public    INTEGER NOT NULL DEFAULT 0,
+    sources_json TEXT,
     created_at   REAL    NOT NULL
+);
+CREATE TABLE IF NOT EXISTS run_followups (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id     INTEGER NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+    role       TEXT    NOT NULL,
+    content    TEXT    NOT NULL,
+    created_at REAL    NOT NULL
 );
 CREATE TABLE IF NOT EXISTS reset_tokens (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -516,6 +538,27 @@ def init_db() -> None:
         import sqlite3
         con = sqlite3.connect(DB_PATH, check_same_thread=False)
         con.executescript(_SQLITE_SCHEMA)
+        # SQLite has no "ADD COLUMN IF NOT EXISTS" guarantee across older
+        # versions, so mirror the Postgres migration list with per-statement
+        # try/except — safe to re-run, existing columns just raise and get
+        # swallowed.
+        sqlite_migrations = [
+            "ALTER TABLE runs ADD COLUMN share_token TEXT",
+            "ALTER TABLE runs ADD COLUMN is_public INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE runs ADD COLUMN sources_json TEXT",
+        ]
+        for stmt in sqlite_migrations:
+            try:
+                con.execute(stmt)
+            except sqlite3.OperationalError as e:
+                print(f"[DB Migration] Non-fatal (SQLite): {e}")
+        try:
+            con.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_runs_share_token "
+                "ON runs(share_token) WHERE share_token IS NOT NULL"
+            )
+        except sqlite3.OperationalError as e:
+            print(f"[DB Migration] Non-fatal (SQLite index): {e}")
         con.commit()
         con.close()
         print(f"[DB] ResearchOS initialised (SQLite at {DB_PATH})")
@@ -531,11 +574,17 @@ def save_run(
     feedback: str,
     user_id: int | None = None,
     workspace_id: int | None = None,
+    sources: list[dict] | None = None,
 ) -> int:
     """
     Save a completed research run (sync fallback for local dev).
     In production, prefer save_run_async() to avoid blocking the event loop.
     Returns the new run's database id.
+
+    sources: the structured {title, url, snippet} list captured live during
+    the pipeline run (see pipeline.py's _parse_search_sources) — persisted
+    so follow-up questions can reference exactly what the Search Agent found,
+    without needing a second web search.
     """
     # Extract score from feedback text e.g. "Score: 8/10"
     score: float | None = None
@@ -545,16 +594,17 @@ def save_run(
 
     word_count   = len(report.split())
     source_count = len(re.findall(r'\[.*?\]\(https?://', report))
+    sources_json = _json.dumps(sources) if sources else None
 
     with _conn() as con:
         cur = con.cursor()
         cur.execute(
             _q(
                 "INSERT INTO runs (topic, report, feedback, score, user_id, workspace_id, "
-                "word_count, source_count, created_at) VALUES (?,?,?,?,?,?,?,?,?)"
+                "word_count, source_count, sources_json, created_at) VALUES (?,?,?,?,?,?,?,?,?,?)"
             ),
             (topic, report, feedback, score, user_id, workspace_id,
-             word_count, source_count, time.time()),
+             word_count, source_count, sources_json, time.time()),
         )
         if USE_POSTGRES:
             cur.execute("SELECT lastval()")
@@ -568,6 +618,7 @@ async def save_run_async(
     feedback: str,
     user_id: int | None = None,
     workspace_id: int | None = None,
+    sources: list[dict] | None = None,
 ) -> int:
     """
     Save a completed research run without blocking the event loop.
@@ -575,7 +626,7 @@ async def save_run_async(
     Returns the new run's database id.
     """
     if not _async_pool:
-        return save_run(topic, report, feedback, user_id, workspace_id)
+        return save_run(topic, report, feedback, user_id, workspace_id, sources)
 
     score: float | None = None
     m = re.search(r"Score:\s*(\d+(?:\.\d+)?)/10", feedback, re.IGNORECASE)
@@ -584,6 +635,7 @@ async def save_run_async(
 
     word_count   = len(report.split())
     source_count = len(re.findall(r'\[.*?\]\(https?://', report))
+    sources_json = _json.dumps(sources) if sources else None
 
     # acquire() borrows one connection from the pool for the duration of this block
     async with _async_pool.acquire() as conn:
@@ -591,12 +643,12 @@ async def save_run_async(
             """
             INSERT INTO runs
                 (topic, report, feedback, score, user_id, workspace_id,
-                 word_count, source_count, created_at)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                 word_count, source_count, sources_json, created_at)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
             RETURNING id
             """,
             topic, report, feedback, score, user_id, workspace_id,
-            word_count, source_count, time.time(),
+            word_count, source_count, sources_json, time.time(),
         )
     return run_id
 
@@ -716,6 +768,154 @@ async def delete_run_async(run_id: int) -> bool:
     async with _async_pool.acquire() as conn:
         result = await conn.execute("DELETE FROM runs WHERE id = $1", run_id)
     return result.split()[-1] != "0"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Shareable report links
+#
+# A share token is a random URL-safe string stored on the run row. Anyone
+# with the token can read that one report via the public (unauthenticated)
+# endpoint — ownership is enforced only when *creating* or *revoking* the
+# token, never when reading by token, since the whole point is a link you
+# can hand to someone who isn't logged in.
+# ─────────────────────────────────────────────────────────────────────────────
+
+def set_run_share_token(run_id: int, user_id: int, token: str) -> bool:
+    """Set (or replace) a run's share token. Returns False if the run
+    doesn't exist or isn't owned by user_id — caller should 404/403 on False."""
+    with _conn() as con:
+        cur = con.cursor()
+        cur.execute(
+            _q("UPDATE runs SET share_token = ?, is_public = 1 WHERE id = ? AND user_id = ?"),
+            (token, run_id, user_id),
+        )
+        return cur.rowcount > 0
+
+
+async def set_run_share_token_async(run_id: int, user_id: int, token: str) -> bool:
+    if not _async_pool:
+        return set_run_share_token(run_id, user_id, token)
+    async with _async_pool.acquire() as conn:
+        result = await conn.execute(
+            "UPDATE runs SET share_token = $1, is_public = 1 WHERE id = $2 AND user_id = $3",
+            token, run_id, user_id,
+        )
+    return result.split()[-1] != "0"
+
+
+def clear_run_share_token(run_id: int, user_id: int) -> bool:
+    """Revoke a run's share link. Returns False if not found/not owned."""
+    with _conn() as con:
+        cur = con.cursor()
+        cur.execute(
+            _q("UPDATE runs SET share_token = NULL, is_public = 0 WHERE id = ? AND user_id = ?"),
+            (run_id, user_id),
+        )
+        return cur.rowcount > 0
+
+
+async def clear_run_share_token_async(run_id: int, user_id: int) -> bool:
+    if not _async_pool:
+        return clear_run_share_token(run_id, user_id)
+    async with _async_pool.acquire() as conn:
+        result = await conn.execute(
+            "UPDATE runs SET share_token = NULL, is_public = 0 WHERE id = $1 AND user_id = $2",
+            run_id, user_id,
+        )
+    return result.split()[-1] != "0"
+
+
+def get_run_by_share_token(token: str) -> dict | None:
+    """Look up a publicly-shared run by its token. No ownership check —
+    the token itself is the authorization."""
+    if not token:
+        return None
+    with _conn() as con:
+        cur = con.cursor()
+        cur.execute(
+            _q("SELECT * FROM runs WHERE share_token = ? AND is_public = 1"),
+            (token,),
+        )
+        return _fetchone(cur)
+
+
+async def get_run_by_share_token_async(token: str) -> dict | None:
+    if not token:
+        return None
+    if not _async_pool:
+        return get_run_by_share_token(token)
+    async with _async_pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT * FROM runs WHERE share_token = $1 AND is_public = 1", token
+        )
+    return dict(row) if row else None
+
+
+def get_run_owner(run_id: int) -> int | None:
+    """Return the user_id that owns a run, or None if the run doesn't exist."""
+    with _conn() as con:
+        cur = con.cursor()
+        cur.execute(_q("SELECT user_id FROM runs WHERE id = ?"), (run_id,))
+        row = _fetchone(cur)
+        return row["user_id"] if row else None
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Follow-up conversation threads
+#
+# Lets a user ask questions about a completed report without re-running the
+# whole 4-agent pipeline. Answered from the report + sources already saved
+# on the run, plus every prior turn in this thread — see agents.py's
+# answer_followup() for how the context gets assembled.
+# ─────────────────────────────────────────────────────────────────────────────
+
+def add_followup_message(run_id: int, role: str, content: str) -> int:
+    """Append one message (role='user' or 'assistant') to a run's follow-up thread."""
+    with _conn() as con:
+        cur = con.cursor()
+        cur.execute(
+            _q("INSERT INTO run_followups (run_id, role, content, created_at) VALUES (?,?,?,?)"),
+            (run_id, role, content, time.time()),
+        )
+        if USE_POSTGRES:
+            cur.execute("SELECT lastval()")
+            return cur.fetchone()[0]
+        return cur.lastrowid
+
+
+async def add_followup_message_async(run_id: int, role: str, content: str) -> int:
+    if not _async_pool:
+        return add_followup_message(run_id, role, content)
+    async with _async_pool.acquire() as conn:
+        msg_id: int = await conn.fetchval(
+            "INSERT INTO run_followups (run_id, role, content, created_at) "
+            "VALUES ($1, $2, $3, $4) RETURNING id",
+            run_id, role, content, time.time(),
+        )
+    return msg_id
+
+
+def get_followups(run_id: int) -> list[dict]:
+    """Return a run's full follow-up thread, oldest first."""
+    with _conn() as con:
+        cur = con.cursor()
+        cur.execute(
+            _q("SELECT id, role, content, created_at FROM run_followups WHERE run_id = ? ORDER BY created_at ASC"),
+            (run_id,),
+        )
+        return _fetchall(cur)
+
+
+async def get_followups_async(run_id: int) -> list[dict]:
+    if not _async_pool:
+        return get_followups(run_id)
+    async with _async_pool.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT id, role, content, created_at FROM run_followups "
+            "WHERE run_id = $1 ORDER BY created_at ASC",
+            run_id,
+        )
+    return [dict(row) for row in rows]
 
 
 def search_runs(user_id: int, query: str, limit: int = 20) -> list[dict]:
@@ -941,36 +1141,23 @@ def get_user_by_username(username: str) -> dict | None:
 
 
 def get_user_by_id(user_id: int) -> dict | None:
-    """
-    Sync fallback — opens a fresh connection per call. Do NOT call this
-    directly from an async route/dependency; use get_user_by_id_async()
-    instead so the shared connection pool is used and the event loop is
-    never blocked. This sync version still exists for local SQLite dev
-    mode and for get_user_by_id_async() to fall back to when no pool
-    has been set up yet.
-    """
     with _conn() as con:
         cur = con.cursor()
         cur.execute(_q("SELECT * FROM users WHERE id = ?"), (user_id,))
         return _fetchone(cur)
 
 
-async def get_user_by_id_async(user_id: int) -> dict | None:
-    """
-    Async, non-blocking version of get_user_by_id().
 
-    THIS IS THE FUNCTION get_current_user() IN auth.py MUST CALL.
-    It runs on every single authenticated request, so it must reuse the
-    shared, already-warm asyncpg pool (set up once at startup) instead of
-    opening a brand-new psycopg2 connection per call — which would block
-    the entire asyncio event loop for every other in-flight request.
-    """
+async def get_user_by_id_async(user_id: int) -> dict | None:
+    """Async version of get_user_by_id(). Used by auth.py's get_current_user()
+    dependency on every authenticated request — must use the pooled connection,
+    not open a fresh one, or it reintroduces the event-loop-blocking bug this
+    file's docstring already fixed once for get_current_user()."""
     if not _async_pool:
         return get_user_by_id(user_id)
     async with _async_pool.acquire() as conn:
         row = await conn.fetchrow("SELECT * FROM users WHERE id = $1", user_id)
     return dict(row) if row else None
-
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # REFRESH TOKENS — session management for the access/refresh token pair.

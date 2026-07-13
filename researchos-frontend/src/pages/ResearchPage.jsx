@@ -15,8 +15,9 @@ import { useSearchParams }       from 'react-router-dom'
 import TopicInput                from '../components/Research/TopicInput'
 import PipelineFlow              from '../components/Research/PipelineFlow'
 import ExecutionLog              from '../components/Research/ExecutionLog'
+import SourceRail                from '../components/Research/SourceRail'
+import FollowUpThread            from '../components/Research/FollowUpThread'
 import ReportViewer              from '../components/Research/ReportViewer'
-import { RelatedContentPanel }   from '../components/Research/RelatedContentPanel'
 import { useSSEStream }          from '../hooks/useSSEStream'
 import { useWorkspace }          from '../context/WorkspaceContext'
 import { MiniHistoryStrip }      from '../components/History/MiniHistoryStrip'
@@ -31,7 +32,7 @@ export default function ResearchPage() {
     rawLogs, milestones, collapsedMilestoneCount,
     steps, report, feedback,
     runStatus, error, topic, isRunning, isDone,
-    runId, ragSessionId,
+    runId, ragSessionId, sources, readSourceUrl,
     start, reset, retry,
   } = useSSEStream()
 
@@ -56,7 +57,7 @@ export default function ResearchPage() {
   }, [searchParams, topic, start, activeWorkspace])
 
   const handleStart = useCallback(
-    (nextTopic) => start(nextTopic, activeWorkspace?.id ?? null),
+    (nextTopic, focusMode = 'balanced') => start(nextTopic, activeWorkspace?.id ?? null, focusMode),
     [start, activeWorkspace]
   )
   const handleReset = useCallback(() => {
@@ -127,12 +128,12 @@ export default function ResearchPage() {
         {error && (
           <div role="alert" style={{
             borderRadius: 8,
-            border: '1px solid #fecaca',
-            background: 'rgba(220,38,38,0.08)',
+            border: '1px solid color-mix(in srgb, var(--danger) 35%, transparent)',
+            background: 'var(--danger-subtle)',
             padding: '10px 14px',
             fontSize: 13,
             fontWeight: 500,
-            color: '#dc2626',
+            color: 'var(--danger)',
             display: 'flex',
             alignItems: 'center',
             gap: 8,
@@ -162,47 +163,41 @@ export default function ResearchPage() {
         {/* ── Report + Execution log ── */}
         <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) 400px', gap: '1.25rem', alignItems: 'start' }}>
 
-          {/* Left: report viewer (+ related panel when done) */}
-          {isDone && displayReport ? (
-            <div style={{ display: 'grid', gridTemplateColumns: displayRunId ? '1fr 260px' : '1fr', gap: '1rem' }}>
-              <ReportViewer
-                report={displayReport}
-                feedback={displayFeedback}
-                status={runStatus}
-                error={error}
-                topic={displayTopic}
-                runId={displayRunId}
-                ragSessionId={ragSessionId}
-              />
-              {displayRunId && <RelatedContentPanel runId={displayRunId} />}
-            </div>
-          ) : (
-            <ReportViewer
-              report={displayReport}
-              feedback={displayFeedback}
-              status={runStatus}
-              error={error}
-              topic={displayTopic}
-              runId={displayRunId}
-              ragSessionId={ragSessionId}
-            />
-          )}
-
-          {/* Right: execution log */}
-          <ExecutionLog
-            milestones={milestones}
-            rawLogs={rawLogs}
-            collapsedCount={collapsedMilestoneCount}
-            isRunning={isRunning}
+          {/* Left: report viewer — full width, no empty middle column */}
+          <ReportViewer
+            report={displayReport}
+            feedback={displayFeedback}
+            status={runStatus}
+            error={error}
+            topic={displayTopic}
+            runId={displayRunId}
+            ragSessionId={ragSessionId}
           />
+
+          {/* Right: live sources + execution log */}
+          <div style={{ display: 'grid', gap: '1.25rem' }}>
+            <SourceRail sources={sources} readUrl={readSourceUrl} isRunning={isRunning} />
+            <ExecutionLog
+              milestones={milestones}
+              rawLogs={rawLogs}
+              collapsedCount={collapsedMilestoneCount}
+              isRunning={isRunning}
+            />
+          </div>
         </div>
+
+        {/* ── Follow-up thread — ask about this report without re-running the pipeline ── */}
+        {isDone && displayReport && displayRunId && (
+          <div style={{ marginTop: '1.25rem' }}>
+            <FollowUpThread runId={displayRunId} />
+          </div>
+        )}
 
       </main>
 
       <style>{`
         @media (max-width: 900px) {
           main > div:last-child { grid-template-columns: 1fr !important; }
-          main > div:nth-child(2) { grid-template-columns: 1fr !important; }
         }
         @media (max-width: 600px) {
           main { padding: 0.75rem !important; }
@@ -219,8 +214,8 @@ const RunStatusBadge = React.memo(function RunStatusBadge({ status, isDone }) {
     idle:              { label: 'Ready',             color: 'var(--text-faint)',  bg: 'var(--bg-card)',    border: 'var(--border)' },
     running:           { label: 'Pipeline Running',  color: 'var(--accent)',      bg: 'var(--accent-dim)', border: 'var(--accent-border)' },
     generating_report: { label: 'Writing Report…',   color: 'var(--accent)',      bg: 'var(--accent-dim)', border: 'var(--accent-border)' },
-    completed:         { label: 'Report Ready',      color: '#16a34a',            bg: '#f0fdf4',           border: '#bbf7d0' },
-    failed:            { label: 'Failed',            color: '#dc2626',            bg: 'rgba(220,38,38,0.08)', border: '#fecaca' },
+    completed:         { label: 'Report Ready',      color: 'var(--success)',     bg: 'var(--success-subtle)', border: 'var(--success)' },
+    failed:            { label: 'Failed',            color: 'var(--danger)',      bg: 'var(--danger-subtle)', border: 'var(--danger)' },
   }
   const cfg = map[status] || map.idle
   return (

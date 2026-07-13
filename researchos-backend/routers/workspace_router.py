@@ -274,7 +274,25 @@ async def unified_history(
         all_items.extend(news_items)
 
     # Sort newest first
-    all_items.sort(key=lambda x: x.get("created_at") or 0, reverse=True)
+    def _created_at_key(item: dict) -> float:
+        val = item.get("created_at")
+        if val is None:
+            return 0.0
+        if isinstance(val, (int, float)):
+            return float(val)
+        if isinstance(val, str):
+            try:
+                return float(val)
+            except ValueError:
+                pass
+            try:
+                from datetime import datetime
+                return datetime.fromisoformat(val.replace("Z", "+00:00")).timestamp()
+            except (ValueError, TypeError):
+                return 0.0
+        return 0.0
+
+    all_items.sort(key=_created_at_key, reverse=True)
 
     return {
         "items":   all_items[:limit],

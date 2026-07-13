@@ -6,9 +6,76 @@ import itertools
 from langchain_groq import ChatGroq
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
-from langchain_core.messages import HumanMessage, AIMessage, ToolMessage
+from langchain_core.messages import HumanMessage, AIMessage, ToolMessage, SystemMessage
 
-from tools import web_search, scrape_url, brave_search
+from tools import web_search, scrape_url, brave_search, make_web_search_tool
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Focus Modes — parameterize the pipeline without changing its architecture.
+# Each mode tweaks: how Tavily searches (depth/topic/result count) and what
+# extra guidance the Writer Agent gets. The LLM's tool schema never changes —
+# only what happens inside the tool, and what's appended to the writer prompt.
+# ─────────────────────────────────────────────────────────────────────────────
+
+FOCUS_MODES: dict[str, dict] = {
+    "balanced": {
+        "label": "Balanced",
+        "max_results": 5,
+        "search_depth": "basic",
+        "topic": "general",
+        "writer_instructions": "",
+    },
+    "quick": {
+        "label": "Quick",
+        "max_results": 3,
+        "search_depth": "basic",
+        "topic": "general",
+        "writer_instructions": (
+            "Keep this report concise — aim for roughly half the usual length. "
+            "Prioritize the single most important finding per section over exhaustive coverage."
+        ),
+    },
+    "academic": {
+        "label": "Academic",
+        "max_results": 6,
+        "search_depth": "advanced",
+        "topic": "general",
+        "writer_instructions": (
+            "Write in a formal, academic register. Prioritize peer-reviewed research, "
+            "primary sources, and institutional publications over blogs or press releases. "
+            "Note methodology or evidence quality where relevant, and flag any claims that "
+            "are contested or lack strong sourcing."
+        ),
+    },
+    "news": {
+        "label": "News",
+        "max_results": 6,
+        "search_depth": "basic",
+        "topic": "news",
+        "writer_instructions": (
+            "Frame this as a news briefing. Lead with what changed most recently, include "
+            "concrete dates, and clearly separate confirmed facts from speculation or analyst commentary."
+        ),
+    },
+    "technical": {
+        "label": "Technical",
+        "max_results": 6,
+        "search_depth": "advanced",
+        "topic": "general",
+        "writer_instructions": (
+            "Write for a technically literate audience. Include specific mechanisms, "
+            "architectures, numbers, or implementation details rather than high-level "
+            "summaries. Define jargon only briefly in passing, don't over-explain basics."
+        ),
+    },
+}
+
+DEFAULT_FOCUS_MODE = "balanced"
+
+
+def resolve_focus_mode(focus_mode: str | None) -> dict:
+    """Look up a focus mode config, falling back safely for unknown/missing values."""
+    return FOCUS_MODES.get((focus_mode or "").lower(), FOCUS_MODES[DEFAULT_FOCUS_MODE])
 from pathlib import Path
 load_dotenv(Path(__file__).parent / ".env", override=True)
 
@@ -103,6 +170,7 @@ def _run_tool_loop(
     tools: list,
     user_message: str,
     max_iterations: int = MAX_TOOL_ITERATIONS,
+    on_tool_result=None,
 ) -> str:
     from groq import RateLimitError, BadRequestError, InternalServerError
 
@@ -116,7 +184,7 @@ def _run_tool_loop(
         try:
             current_llm = ChatGroq(api_key=key, model=model, temperature=llm.temperature)
             print(f"[Groq] Trying model={model}  key={key[:12]}… (attempt {attempt+1}/{len(combos)})")
-            return _run_tool_loop_inner(current_llm, tools, user_message, max_iterations)
+            return _run_tool_loop_inner(current_llm, tools, user_message, max_iterations, on_tool_result)
         except RateLimitError as exc:
             print(f"[Groq] 429 — model={model} key={key[:12]}… exhausted, trying next combo")
             last_err = exc
@@ -141,8 +209,16 @@ def _run_tool_loop_inner(
     tools: list,
     user_message: str,
     max_iterations: int = MAX_TOOL_ITERATIONS,
+    on_tool_result=None,
 ) -> str:
-    """Core tool loop — no retry logic."""
+    """Core tool loop — no retry logic.
+
+    on_tool_result: optional callback(name: str, args: dict, result_str: str)
+    fired right after each tool invocation succeeds. This lets callers (e.g.
+    pipeline.py) capture the *raw* tool output — exact titles/URLs from
+    Tavily — before it gets folded into the LLM's paraphrased summary, which
+    is what powers the live source rail on the frontend.
+    """
     tool_map: dict[str, object] = {t.name: t for t in tools}
     llm_with_tools = llm.bind_tools(tools)
     messages: list = [HumanMessage(content=user_message)]
@@ -165,6 +241,11 @@ def _run_tool_loop_inner(
                 try:
                     result = tool_map[name].invoke(args)
                     result_str = str(result)
+                    if on_tool_result:
+                        try:
+                            on_tool_result(name, args, result_str)
+                        except Exception as cb_exc:
+                            print(f"[on_tool_result] callback failed (non-fatal): {cb_exc}")
                 except Exception as exc:
                     result_str = f"[Tool error] {name} failed: {exc}"
 
@@ -178,9 +259,26 @@ def _run_tool_loop_inner(
 # Search Agent
 # ─────────────────────────────────────────────────────────────────────────────
 
-def run_search_agent(topic: str, llm: ChatGroq | None = None) -> str:
+def run_search_agent(
+    topic: str,
+    llm: ChatGroq | None = None,
+    on_tool_result=None,
+    focus_mode: str = DEFAULT_FOCUS_MODE,
+) -> str:
     if llm is None:
         llm = get_tool_llm()
+
+    mode = resolve_focus_mode(focus_mode)
+    search_tool = make_web_search_tool(
+        max_results=mode["max_results"],
+        search_depth=mode["search_depth"],
+        topic=mode["topic"],
+    )
+
+    news_hint = (
+        "\nPrioritize the most recent developments — this is a news-focused search."
+        if mode["topic"] == "news" else ""
+    )
 
     prompt = (
         f"You are a research assistant. Your task: find recent, reliable, and "
@@ -191,9 +289,10 @@ def run_search_agent(topic: str, llm: ChatGroq | None = None) -> str:
         f"2. Review the results.\n"
         f"3. Return a clean summary of the most relevant sources, including: "
         f"title, URL, and a one-sentence summary of each result."
+        f"{news_hint}"
     )
 
-    return _run_tool_loop(llm, tools=[web_search], user_message=prompt)
+    return _run_tool_loop(llm, tools=[search_tool], user_message=prompt, on_tool_result=on_tool_result)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -204,6 +303,7 @@ def run_reader_agent(
     topic: str,
     search_results: str,
     llm: ChatGroq | None = None,
+    on_tool_result=None,
 ) -> str:
     if llm is None:
         llm = get_tool_llm()
@@ -219,7 +319,7 @@ def run_reader_agent(
         f"3. Return the key extracted information in a structured format."
     )
 
-    return _run_tool_loop(llm, tools=[scrape_url, brave_search], user_message=prompt)
+    return _run_tool_loop(llm, tools=[scrape_url, brave_search], user_message=prompt, on_tool_result=on_tool_result)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -255,15 +355,18 @@ Rules:
 - Avoid repetition
 - Expand explanations with concrete context
 - List all source URLs under ## Sources as markdown links
-""",
+{focus_instructions}""",
     ),
 ])
 
 
-def build_writer_chain(llm: ChatGroq | None = None):
+def build_writer_chain(llm: ChatGroq | None = None, focus_mode: str = DEFAULT_FOCUS_MODE):
     if llm is None:
         llm = get_chain_llm()
-    return _WRITER_PROMPT | llm | StrOutputParser()
+    mode = resolve_focus_mode(focus_mode)
+    extra = f"\nFocus mode — {mode['label']}: {mode['writer_instructions']}" if mode["writer_instructions"] else ""
+    prompt = _WRITER_PROMPT.partial(focus_instructions=extra)
+    return prompt | llm | StrOutputParser()
 
 
 _WRITER_REVISION_PROMPT = ChatPromptTemplate.from_messages([
@@ -302,15 +405,18 @@ Rules:
 - Be factual and professional
 - Avoid repetition
 - List all source URLs under ## Sources as markdown links
-""",
+{focus_instructions}""",
     ),
 ])
 
 
-def build_writer_revision_chain(llm: ChatGroq | None = None):
+def build_writer_revision_chain(llm: ChatGroq | None = None, focus_mode: str = DEFAULT_FOCUS_MODE):
     if llm is None:
         llm = get_chain_llm()
-    return _WRITER_REVISION_PROMPT | llm | StrOutputParser()
+    mode = resolve_focus_mode(focus_mode)
+    extra = f"\nFocus mode — {mode['label']}: {mode['writer_instructions']}" if mode["writer_instructions"] else ""
+    prompt = _WRITER_REVISION_PROMPT.partial(focus_instructions=extra)
+    return prompt | llm | StrOutputParser()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -355,3 +461,75 @@ def build_critic_chain(llm: ChatGroq | None = None):
     if llm is None:
         llm = get_chain_llm()
     return _CRITIC_PROMPT | llm | StrOutputParser()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Follow-up Q&A
+#
+# Answers questions about an already-completed report WITHOUT re-running the
+# search/reader/writer/critic pipeline. This is what turns a one-shot report
+# generator into something you can actually have a conversation with — the
+# Perplexity-style thread experience.
+#
+# Deliberately NOT a tool-calling agent: the report + sources already contain
+# everything the Search and Reader agents found, so a single grounded LLM
+# call over that existing context is faster, cheaper, and just as accurate
+# as re-searching the web for something already covered.
+# ─────────────────────────────────────────────────────────────────────────────
+
+MAX_FOLLOWUP_HISTORY_TURNS = 10  # keep the last N turns — bounds context growth on long threads
+
+
+def _format_sources_for_context(sources: list[dict] | None) -> str:
+    if not sources:
+        return "(no structured source list was saved for this report)"
+    lines = []
+    for i, s in enumerate(sources, 1):
+        lines.append(f"[{i}] {s.get('title', 'Untitled')} — {s.get('url', '')}\n    {s.get('snippet', '')}")
+    return "\n".join(lines)
+
+
+def answer_followup(
+    topic: str,
+    report: str,
+    sources: list[dict] | None,
+    history: list[dict],
+    question: str,
+    llm: ChatGroq | None = None,
+) -> str:
+    """
+    topic, report, sources: the original research run's saved context.
+    history: prior turns in this thread, oldest first — each a dict with
+             {"role": "user"|"assistant", "content": str}, as stored in the
+             run_followups table.
+    question: the new question being asked right now.
+
+    Returns the assistant's answer as plain text (Markdown allowed).
+    """
+    if llm is None:
+        llm = get_chain_llm()
+
+    system_prompt = (
+        "You are ResearchOS's follow-up assistant. The user already received a full "
+        "research report on a topic; your job is to answer follow-up questions about "
+        "it accurately, using ONLY the report and sources below plus this conversation. "
+        "If the answer genuinely isn't in the report or sources, say so plainly instead "
+        "of guessing — do not invent facts, statistics, or sources that aren't provided. "
+        "Keep answers focused and conversational, not another full report. "
+        "You may cite sources by their [N] number when relevant.\n\n"
+        f"ORIGINAL TOPIC:\n{topic}\n\n"
+        f"REPORT:\n{report[:6000]}\n\n"
+        f"SOURCES:\n{_format_sources_for_context(sources)}"
+    )
+
+    messages: list = [SystemMessage(content=system_prompt)]
+    for turn in history[-(MAX_FOLLOWUP_HISTORY_TURNS * 2):]:
+        role, content = turn.get("role"), turn.get("content", "")
+        if role == "user":
+            messages.append(HumanMessage(content=content))
+        elif role == "assistant":
+            messages.append(AIMessage(content=content))
+    messages.append(HumanMessage(content=question))
+
+    response = llm.invoke(messages)
+    return response.content or "I couldn't generate an answer — please try rephrasing your question."

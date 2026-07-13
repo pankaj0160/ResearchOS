@@ -25,9 +25,18 @@ def _load_keys(env_var: str) -> list[str]:
 TAVILY_KEYS = _load_keys("TAVILY_API_KEYS")
 
 
-def _tavily_search(query: str, max_results: int = 5) -> dict:
+def _tavily_search(
+    query: str,
+    max_results: int = 5,
+    search_depth: str = "basic",
+    topic: str = "general",
+) -> dict:
     """
     Try each Tavily key in sequence; raise only when all fail.
+
+    search_depth: "basic" | "advanced" — Tavily's own quality/depth knob.
+    topic:        "general" | "news"   — biases Tavily's ranking toward
+                  recency and news sources when set to "news".
     """
     try:
         from tavily import TavilyClient
@@ -38,7 +47,12 @@ def _tavily_search(query: str, max_results: int = 5) -> dict:
     for key in TAVILY_KEYS:
         try:
             client = TavilyClient(api_key=key)
-            return client.search(query=query, max_results=max_results)
+            return client.search(
+                query=query,
+                max_results=max_results,
+                search_depth=search_depth,
+                topic=topic,
+            )
         except Exception as exc:
             print(f"[Tavily] key failed ({key[:10]}…): {exc}")
             last_err = exc
@@ -67,6 +81,39 @@ def web_search(query: str) -> str:
 
     except Exception as exc:
         return f"[web_search error] {exc}"
+
+
+def make_web_search_tool(max_results: int = 5, search_depth: str = "basic", topic: str = "general"):
+    """
+    Build a focus-mode-parameterized web_search tool.
+
+    The LLM only ever sees and controls `query` — max_results/search_depth/
+    topic are baked in at tool-creation time by the pipeline based on the
+    user's chosen focus mode (Quick/Academic/News/Technical), so the model's
+    tool schema and prompting stay identical across modes; only what Tavily
+    actually does under the hood changes.
+    """
+    @tool("web_search")
+    def _web_search(query: str) -> str:
+        """Search the web for recent, reliable information on a topic."""
+        try:
+            results = _tavily_search(query, max_results=max_results, search_depth=search_depth, topic=topic)
+            if not results.get("results"):
+                return "No results found."
+
+            lines: list[str] = []
+            for r in results["results"]:
+                lines.append(
+                    f"Title:   {r.get('title', 'N/A')}\n"
+                    f"URL:     {r.get('url', 'N/A')}\n"
+                    f"Snippet: {r.get('content', '')[:400]}\n"
+                )
+            return "\n----\n".join(lines)
+
+        except Exception as exc:
+            return f"[web_search error] {exc}"
+
+    return _web_search
 
 
 @tool

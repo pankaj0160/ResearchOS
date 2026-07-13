@@ -21,8 +21,44 @@ def _has_real_keys() -> bool:
     return bool(groq and tavily)
 
 
-def _ev(agent: str, type_: str, msg: str, tool: str | None = None) -> dict:
-    return {"agent": agent, "type": type_, "msg": msg, "tool": tool}
+def _ev(agent: str, type_: str, msg: str, tool: str | None = None, **extra) -> dict:
+    return {"agent": agent, "type": type_, "msg": msg, "tool": tool, **extra}
+
+
+_SOURCE_BLOCK_RE = re.compile(
+    r"Title:\s*(?P<title>.+?)\s*\n\s*URL:\s*(?P<url>\S+)\s*\n\s*Snippet:\s*(?P<snippet>.*?)(?:\n\s*\n|\Z)",
+    re.DOTALL,
+)
+
+
+def _parse_search_sources(raw: str, limit: int = 6) -> list[dict]:
+    """Parse tools.py's `web_search` raw output ("Title:/URL:/Snippet:" blocks,
+    separated by "----") into structured {title, url, snippet} dicts.
+
+    This runs on the *raw* tool result captured via on_tool_result — i.e.
+    before the search agent's LLM paraphrases it into a summary — so the
+    URLs here are exactly what Tavily returned, not an LLM's best guess at
+    reproducing them.
+    """
+    if not raw or raw.startswith("[web_search error]") or raw == "No results found.":
+        return []
+
+    sources = []
+    for block in raw.split("\n----\n"):
+        m = _SOURCE_BLOCK_RE.search(block + "\n\n")
+        if not m:
+            continue
+        url = m.group("url").strip()
+        if not url or url == "N/A":
+            continue
+        sources.append({
+            "title":   (m.group("title") or url).strip()[:160],
+            "url":     url,
+            "snippet": m.group("snippet").strip()[:220],
+        })
+        if len(sources) >= limit:
+            break
+    return sources
 
 
 QUALITY_THRESHOLD = 0.7   # i.e. 7/10
@@ -41,7 +77,7 @@ def _parse_score(feedback: str) -> float | None:
 # ═════════════════════════════════════════════════════════════════════════════
 
 @traceable(name="research_pipeline", run_type="chain")
-def run_real_pipeline(topic: str) -> Generator[dict, None, None]:
+def run_real_pipeline(topic: str, focus_mode: str = "balanced") -> Generator[dict, None, None]:
     from agents import (
         get_tool_llm,
         get_chain_llm,
@@ -50,12 +86,16 @@ def run_real_pipeline(topic: str) -> Generator[dict, None, None]:
         build_writer_chain,
         build_critic_chain,
         build_writer_revision_chain,
+        resolve_focus_mode,
     )
 
+    mode = resolve_focus_mode(focus_mode)
     state: dict = {}
 
     # ── LLM initialisation ───────────────────────────────────────────────────
     yield _ev("search", "thinking", "Initialising LLMs...")
+    if mode["label"] != "Balanced":
+        yield _ev("search", "focus_mode", f"Focus mode: {mode['label']}", focus_mode=focus_mode)
 
     try:
         tool_llm  = get_tool_llm()
@@ -68,14 +108,26 @@ def run_real_pipeline(topic: str) -> Generator[dict, None, None]:
     yield _ev("search", "thinking", f'Formulating search strategy for: "{topic}"')
     yield _ev("search", "tool_call", f'web_search("{topic}")', tool="web_search")
 
+    raw_tool_results: dict[str, str] = {}
+
+    def _capture_search(name: str, args: dict, result_str: str) -> None:
+        # Keep the first (only) web_search call's raw output — this is the
+        # exact Tavily response, before the agent's LLM paraphrases it.
+        if name in ("web_search", "brave_search") and "web_search" not in raw_tool_results:
+            raw_tool_results["web_search"] = result_str
+
     try:
         print(f"[Pipeline] Starting search agent for: {topic!r}")
-        state["search_results"] = run_search_agent(topic=topic, llm=tool_llm)
+        state["search_results"] = run_search_agent(topic=topic, llm=tool_llm, on_tool_result=_capture_search, focus_mode=focus_mode)
         print(f"[Pipeline] Search agent done — {len(state['search_results'])} chars")
     except Exception as exc:
         print(f"[Pipeline] Search agent EXCEPTION:\n{traceback.format_exc()}")
         yield _ev("search", "error", f"Search agent failed: {exc}")
         return
+
+    sources = _parse_search_sources(raw_tool_results.get("web_search", ""))
+    if sources:
+        yield _ev("search", "sources", f"Found {len(sources)} sources", sources=sources)
 
     yield _ev("search", "result",
               f"Retrieved {len(state['search_results'])} chars of search data")
@@ -86,12 +138,20 @@ def run_real_pipeline(topic: str) -> Generator[dict, None, None]:
     yield _ev("reader", "tool_call",
               "scrape_url(best source from results)", tool="scrape_url")
 
+    read_url: str | None = None
+
+    def _capture_reader(name: str, args: dict, result_str: str) -> None:
+        nonlocal read_url
+        if name in ("scrape_url",) and read_url is None:
+            read_url = args.get("url")
+
     try:
         print(f"[Pipeline] Starting reader agent...")
         state["scraped_content"] = run_reader_agent(
             topic=topic,
             search_results=state["search_results"],
             llm=tool_llm,
+            on_tool_result=_capture_reader,
         )
         print(f"[Pipeline] Reader agent done — {len(state['scraped_content'])} chars")
     except Exception as exc:
@@ -101,6 +161,9 @@ def run_real_pipeline(topic: str) -> Generator[dict, None, None]:
         state["scraped_content"] = (
             "[Reader could not scrape content — report uses search data only]"
         )
+
+    if read_url:
+        yield _ev("reader", "source_read", "Reading full article", url=read_url)
 
     yield _ev("reader", "result",
               f"Extracted {len(state['scraped_content'])} chars of page content")
@@ -113,8 +176,8 @@ def run_real_pipeline(topic: str) -> Generator[dict, None, None]:
     )
 
     try:
-        writer_chain   = build_writer_chain(chain_llm)
-        revision_chain = build_writer_revision_chain(chain_llm)
+        writer_chain   = build_writer_chain(chain_llm, focus_mode=focus_mode)
+        revision_chain = build_writer_revision_chain(chain_llm, focus_mode=focus_mode)
         critic_chain   = build_critic_chain(chain_llm)
     except Exception as exc:
         yield _ev("writer", "error", f"Chain setup failed: {exc}")
@@ -272,13 +335,27 @@ def _stream_words(text: str, topic: str, delay: float = 0.014) -> Generator[str,
         time.sleep(delay)
 
 
-def run_simulation_pipeline(topic: str) -> Generator[dict, None, None]:
+def run_simulation_pipeline(topic: str, focus_mode: str = "balanced") -> Generator[dict, None, None]:
+    from agents import resolve_focus_mode
+    mode = resolve_focus_mode(focus_mode)
+
     def pause(s: float): time.sleep(s)
 
     yield _ev("search", "thinking", f'Formulating search strategy for: "{topic}"')
+    if mode["label"] != "Balanced":
+        yield _ev("search", "focus_mode", f"Focus mode: {mode['label']}", focus_mode=focus_mode)
     pause(0.6)
     yield _ev("search", "tool_call", f'web_search("{topic}")', tool="web_search")
     pause(1.2)
+
+    sim_sources = [
+        {"title": f"{topic} — TechCrunch",             "url": "https://techcrunch.com",             "snippet": f"Recent coverage and analysis of {topic}, including industry reaction and what it means going forward."},
+        {"title": f"{topic}: A Deep Dive — MIT Technology Review", "url": "https://technologyreview.com", "snippet": f"An in-depth technical look at {topic}, examining the underlying mechanisms and open research questions."},
+        {"title": f"{topic} — Stanford HAI",           "url": "https://hai.stanford.edu",            "snippet": f"Academic perspective on {topic} from Stanford's Human-Centered AI Institute, with citations to primary research."},
+        {"title": f"{topic} Market Outlook — Gartner",  "url": "https://gartner.com",                 "snippet": f"Analyst commentary on adoption trends and forecasts related to {topic} through the next several years."},
+    ]
+    yield _ev("search", "sources", f"Found {len(sim_sources)} sources", sources=sim_sources)
+    pause(0.2)
     yield _ev("search", "result", "Retrieved 4 sources (TechCrunch, MIT TR, Stanford HAI, Gartner)")
     pause(0.3)
     yield _ev("search", "complete", "Search phase complete")
@@ -288,7 +365,9 @@ def run_simulation_pipeline(topic: str) -> Generator[dict, None, None]:
     pause(0.7)
     yield _ev("reader", "tool_call",
               "scrape_url(https://technologyreview.com)", tool="scrape_url")
-    pause(1.4)
+    pause(0.5)
+    yield _ev("reader", "source_read", "Reading full article", url="https://technologyreview.com")
+    pause(0.9)
     yield _ev("reader", "result", "Extracted 3,842 chars of structured article text")
     pause(0.3)
     yield _ev("reader", "complete", "Reader phase complete")
@@ -315,7 +394,7 @@ def run_simulation_pipeline(topic: str) -> Generator[dict, None, None]:
 # ASYNC WRAPPER — bridges sync generators → FastAPI SSE
 # ═════════════════════════════════════════════════════════════════════════════
 
-async def run_pipeline_async(topic: str) -> AsyncGenerator[dict, None]:
+async def run_pipeline_async(topic: str, focus_mode: str = "balanced") -> AsyncGenerator[dict, None]:
     """
     Wraps synchronous pipeline generators into an async generator for FastAPI SSE.
 
@@ -331,11 +410,19 @@ async def run_pipeline_async(topic: str) -> AsyncGenerator[dict, None]:
 
     use_sim = not _has_real_keys()
     if use_sim:
-        print(f"[OrchestrAI] SIMULATION mode — topic={topic!r}")
-        gen = run_simulation_pipeline(topic)
+        print(f"[OrchestrAI] SIMULATION mode — topic={topic!r} focus_mode={focus_mode!r}")
+        gen = run_simulation_pipeline(topic, focus_mode=focus_mode)
+    elif os.getenv("USE_LANGGRAPH_PIPELINE", "false").lower() == "true":
+        # Opt-in only — defaults to "false" so existing behaviour (the
+        # original run_real_pipeline below) is completely unchanged unless
+        # this env var is explicitly set. See pipeline_langgraph.py for the
+        # LangGraph StateGraph version of this same orchestration.
+        from pipeline_langgraph import run_real_pipeline_graph
+        print(f"[OrchestrAI] REAL mode (LangGraph) — topic={topic!r} focus_mode={focus_mode!r}")
+        gen = run_real_pipeline_graph(topic, focus_mode=focus_mode)
     else:
-        print(f"[OrchestrAI] REAL mode — topic={topic!r}")
-        gen = run_real_pipeline(topic)
+        print(f"[OrchestrAI] REAL mode — topic={topic!r} focus_mode={focus_mode!r}")
+        gen = run_real_pipeline(topic, focus_mode=focus_mode)
 
     queue: asyncio.Queue[dict | None] = asyncio.Queue()
 

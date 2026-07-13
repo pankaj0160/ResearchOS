@@ -37,6 +37,14 @@ export const newsApi = {
     ),
 
   /**
+   * Cross-references recent research history against fresh news — returns
+   * only topics where genuinely new coverage exists since the research ran.
+   * Powers the "Continue your research" digest on the Dashboard.
+   */
+  continueResearch: (limit = 5) =>
+    apiClient.get(`/api/news/continue-research?limit=${limit}`),
+
+  /**
    * Stream an AI news briefing via SSE using fetch() (NOT EventSource).
    *
    * Why fetch() and not EventSource?

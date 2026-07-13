@@ -17,15 +17,25 @@ const SUGGESTIONS = [
   'Autonomous vehicle progress',
 ]
 
+// Mirrors FOCUS_MODES in backend/agents.py — keep labels/order in sync.
+const FOCUS_MODES = [
+  { value: 'balanced', label: 'Balanced', hint: 'Default depth and tone' },
+  { value: 'quick', label: 'Quick', hint: 'Shorter report, fewer sources' },
+  { value: 'academic', label: 'Academic', hint: 'Formal tone, prioritizes primary sources' },
+  { value: 'news', label: 'News', hint: 'Recency-weighted, briefing style' },
+  { value: 'technical', label: 'Technical', hint: 'Mechanisms and specifics over summaries' },
+]
+
 function TopicInput({ onStart, onClear, isRunning, canRetry, onRetry, currentTopic }) {
   const [topic, setTopic] = useState('')
   const [focused, setFocused] = useState(false)
+  const [focusMode, setFocusMode] = useState('balanced')
 
   const submit = useCallback((event) => {
     event.preventDefault()
     const cleanTopic = topic.trim()
-    if (cleanTopic && !isRunning) onStart(cleanTopic)
-  }, [isRunning, onStart, topic])
+    if (cleanTopic && !isRunning) onStart(cleanTopic, focusMode)
+  }, [isRunning, onStart, topic, focusMode])
 
   const clear = useCallback(() => {
     setTopic('')
@@ -118,6 +128,41 @@ function TopicInput({ onStart, onClear, isRunning, canRetry, onRetry, currentTop
           </button>
         )}
       </form>
+
+      <div role="radiogroup" aria-label="Focus mode" style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 14 }}>
+        <span style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', fontFamily: 'var(--font-mono)', alignSelf: 'center', marginRight: 4 }}>
+          Focus:
+        </span>
+        {FOCUS_MODES.map((mode) => {
+          const isSelected = focusMode === mode.value
+          return (
+            <button
+              key={mode.value}
+              type="button"
+              role="radio"
+              aria-checked={isSelected}
+              title={mode.hint}
+              disabled={isRunning}
+              onClick={() => setFocusMode(mode.value)}
+              className="focus-mode-chip"
+              style={{
+                borderRadius: 99,
+                border: `1.5px solid ${isSelected ? 'var(--accent)' : 'var(--border)'}`,
+                background: isSelected ? 'var(--accent-dim)' : 'var(--bg-inset)',
+                color: isSelected ? 'var(--accent)' : 'var(--text-secondary)',
+                padding: '5px 12px',
+                fontSize: 12,
+                fontWeight: isSelected ? 700 : 500,
+                cursor: isRunning ? 'not-allowed' : 'pointer',
+                opacity: isRunning ? 0.6 : 1,
+                transition: 'all 0.16s',
+              }}
+            >
+              {mode.label}
+            </button>
+          )
+        })}
+      </div>
 
       {!isRunning && !topic && (
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 14 }}>

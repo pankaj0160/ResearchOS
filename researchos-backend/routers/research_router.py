@@ -22,6 +22,7 @@ from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import Response, StreamingResponse
+from pydantic import BaseModel, Field
 
 import database
 from auth import get_current_user
@@ -33,10 +34,12 @@ from database import (
     save_run,
     save_run_async,      # Task 2.3: async version for the SSE stream save
     search_runs_async, get_run_async, delete_run_async,
+    set_run_share_token_async, clear_run_share_token_async, get_run_by_share_token_async,
+    add_followup_message_async, get_followups_async,
 )
 from pipeline import run_pipeline_async
 from rag import ingest_text_content
-from rate_limit import research_limiter
+from rate_limit import research_limiter, followup_limiter
 from error_models import STANDARD_ERROR_RESPONSES, ErrorResponse
 
 # ── Create the router ─────────────────────────────────────────────────────────
@@ -118,6 +121,7 @@ async def _ingest_text_background(
 async def research_stream(
     topic:        str = Query(..., min_length=3, max_length=300),
     workspace_id: int = Query(default=None),   # optional — links run to a workspace
+    focus_mode:   str = Query(default="balanced", max_length=32),  # Quick/Academic/News/Technical
     current_user: CurrentUser = None,
 ):
     # Check rate limit — max 5 research runs per 60 seconds per user
@@ -141,12 +145,13 @@ async def research_stream(
     async def event_stream():
         report    = ""                  # accumulates the writer agent's output
         feedback  = ""                  # accumulates the critic agent's output
+        run_sources: list[dict] = []    # NEW: captured from the "sources" event, persisted with the run
         last_ping = asyncio.get_event_loop().time()
 
         try:
             # run_pipeline_async is an async generator — it yields one event at a time
             # Each yielded event is immediately sent to the browser as an SSE message
-            async for event in run_pipeline_async(topic):
+            async for event in run_pipeline_async(topic, focus_mode=focus_mode):
                 now = asyncio.get_event_loop().time()
 
                 # Send a ping every 15 seconds so the browser connection stays alive
@@ -163,6 +168,10 @@ async def research_stream(
                 if event.get("agent") == "critic" and event.get("type") in ("chunk", "streaming"):
                     feedback += event.get("msg", "")
 
+                # Capture structured sources for persistence (powers follow-up Q&A later)
+                if event.get("agent") == "search" and event.get("type") == "sources":
+                    run_sources = event.get("sources") or []
+
                 # Send every event to the browser immediately
                 yield f"data: {json.dumps(event)}\n\n"
                 last_ping = asyncio.get_event_loop().time()
@@ -178,6 +187,7 @@ async def research_stream(
                     feedback,
                     user_id=user_id,
                     workspace_id=workspace_id,
+                    sources=run_sources,
                 )
 
                 # Auto-ingest the report into RAG as a background task
@@ -357,6 +367,147 @@ async def export_run(run_id: int, current_user: CurrentUser):
         media_type = "text/markdown",
         headers    = {"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+# ── POST /api/history/{run_id}/share ──────────────────────────────────────────
+# Creates (or rotates) a public share link for one report. Anyone with the
+# resulting token can view a read-only version of the report without an
+# account — see the public GET route below.
+
+@router.post(
+    "/api/history/{run_id}/share",
+    responses=STANDARD_ERROR_RESPONSES,
+)
+async def create_share_link(run_id: int, current_user: CurrentUser):
+    run = await get_run_async(run_id)
+    if not run:
+        raise HTTPException(404, "Run not found")
+    if run.get("user_id") != current_user["id"]:
+        raise HTTPException(403, "Access denied")
+    if not run.get("report", "").strip():
+        raise HTTPException(422, "This run has no report content to share")
+
+    token  = uuid4().hex
+    ok = await set_run_share_token_async(run_id, current_user["id"], token)
+    if not ok:
+        raise HTTPException(500, "Could not create share link — please try again")
+    return {"share_token": token}
+
+
+# ── DELETE /api/history/{run_id}/share ────────────────────────────────────────
+# Revokes an existing share link. The old token stops working immediately.
+
+@router.delete(
+    "/api/history/{run_id}/share",
+    responses=STANDARD_ERROR_RESPONSES,
+)
+async def revoke_share_link(run_id: int, current_user: CurrentUser):
+    run = await get_run_async(run_id)
+    if not run:
+        raise HTTPException(404, "Run not found")
+    if run.get("user_id") != current_user["id"]:
+        raise HTTPException(403, "Access denied")
+    await clear_run_share_token_async(run_id, current_user["id"])
+    return {"revoked": True}
+
+
+# ── GET /api/public/reports/{token} ───────────────────────────────────────────
+# Unauthenticated — the token itself is the access control. Only returns the
+# fields safe to show a stranger: no user_id, no workspace_id, no internal ids
+# beyond what's needed to render the report.
+
+@router.get(
+    "/api/public/reports/{token}",
+    responses=STANDARD_ERROR_RESPONSES,
+)
+async def get_public_report(token: str):
+    run = await get_run_by_share_token_async(token)
+    if not run:
+        raise HTTPException(404, "This link doesn't exist or has been revoked")
+
+    return {
+        "topic":        run.get("topic", ""),
+        "report":       run.get("report", ""),
+        "word_count":   run.get("word_count", 0),
+        "source_count": run.get("source_count", 0),
+        "score":        run.get("score"),
+        "created_at":   run.get("created_at"),
+    }
+
+
+# ── GET /api/history/{run_id}/followups ───────────────────────────────────────
+# Returns the full follow-up thread for a report, oldest first — used to
+# restore the conversation when a user reopens a past report.
+
+@router.get(
+    "/api/history/{run_id}/followups",
+    responses=STANDARD_ERROR_RESPONSES,
+)
+async def list_followups(run_id: int, current_user: CurrentUser):
+    run = await get_run_async(run_id)
+    if not run:
+        raise HTTPException(404, "Run not found")
+    if run.get("user_id") != current_user["id"]:
+        raise HTTPException(403, "Access denied")
+
+    messages = await get_followups_async(run_id)
+    return {"messages": messages}
+
+
+# ── POST /api/history/{run_id}/followup ───────────────────────────────────────
+# Ask a question about a completed report. Answered from the report + saved
+# sources plus prior thread turns — does NOT re-run the search/reader/writer/
+# critic pipeline. See agents.py's answer_followup().
+
+class FollowupRequest(BaseModel):
+    question: str = Field(..., min_length=1, max_length=1000)
+
+
+@router.post(
+    "/api/history/{run_id}/followup",
+    responses=STANDARD_ERROR_RESPONSES,
+)
+async def ask_followup(run_id: int, body: FollowupRequest, current_user: CurrentUser):
+    followup_limiter.check(current_user["id"])
+
+    run = await get_run_async(run_id)
+    if not run:
+        raise HTTPException(404, "Run not found")
+    if run.get("user_id") != current_user["id"]:
+        raise HTTPException(403, "Access denied")
+    if not run.get("report", "").strip():
+        raise HTTPException(422, "This run has no report to ask questions about")
+
+    question = body.question.strip()
+
+    # Lazy imports — avoid pulling agents.py's LLM setup into every request to this router
+    from agents import answer_followup, get_chain_llm
+
+    sources_raw = run.get("sources_json")
+    sources = json.loads(sources_raw) if sources_raw else []
+
+    history = await get_followups_async(run_id)
+
+    try:
+        loop = asyncio.get_event_loop()
+        answer = await loop.run_in_executor(
+            None,
+            lambda: answer_followup(
+                topic=run["topic"],
+                report=run["report"],
+                sources=sources,
+                history=history,
+                question=question,
+                llm=get_chain_llm(),
+            ),
+        )
+    except Exception as exc:
+        raise HTTPException(502, f"Follow-up failed: {exc}")
+
+    await add_followup_message_async(run_id, "user", question)
+    await add_followup_message_async(run_id, "assistant", answer)
+
+    return {"answer": answer}
 
 
 # ── GET /api/history/{run_id}/related ────────────────────────────────────────

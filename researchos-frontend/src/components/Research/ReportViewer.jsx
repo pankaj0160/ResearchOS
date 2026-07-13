@@ -16,6 +16,7 @@ import { memo, useCallback, useMemo, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm    from 'remark-gfm'
 import { useNavigate } from 'react-router-dom'
+import { apiClient } from '../../services/apiClient'
 
 // ── Status label helper ───────────────────────────────────────────────────────
 function statusLabel(status, hasReport, hasFeedback) {
@@ -91,6 +92,7 @@ function ReportViewer({ report, feedback, status, error, topic, runId, ragSessio
   const navigate   = useNavigate()
   const [copied,   setCopied]  = useState(false)
   const [activeTab, setTab]    = useState('report')
+  const [shareState, setShareState] = useState('idle') // idle | loading | copied | error
 
   const hasReport   = report.trim().length > 0
   const hasFeedback = feedback.trim().length > 0
@@ -125,6 +127,23 @@ function ReportViewer({ report, feedback, status, error, topic, runId, ragSessio
     a.href = url; a.download = filename; a.click()
     URL.revokeObjectURL(url)
   }, [exportContent, hasReport, topic])
+
+  const shareReport = useCallback(async () => {
+    if (!runId || !hasReport || shareState === 'loading') return
+    setShareState('loading')
+    const res = await apiClient.post(`/api/history/${runId}/share`)
+    if (!res.ok) {
+      setShareState('error')
+      setTimeout(() => setShareState('idle'), 2500)
+      return
+    }
+    const link = `${window.location.origin}/r/${res.data.share_token}`
+    try {
+      await navigator.clipboard.writeText(link)
+    } catch { /* clipboard blocked — link still generated, just not copied */ }
+    setShareState('copied')
+    setTimeout(() => setShareState('idle'), 2500)
+  }, [runId, hasReport, shareState])
 
   return (
     <div style={{
@@ -181,6 +200,9 @@ function ReportViewer({ report, feedback, status, error, topic, runId, ragSessio
           </ToolbarBtn>
           <ToolbarBtn onClick={downloadReport} disabled={!hasReport}>
             ⬇ Download
+          </ToolbarBtn>
+          <ToolbarBtn onClick={shareReport} disabled={!hasReport || !runId || shareState === 'loading'}>
+            {shareState === 'copied' ? '✓ Link copied' : shareState === 'error' ? '✕ Failed' : shareState === 'loading' ? '…' : '🔗 Share'}
           </ToolbarBtn>
 
           {/* Chat with report button */}

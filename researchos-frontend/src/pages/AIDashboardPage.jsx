@@ -13,6 +13,7 @@ import { WeatherCard }     from '../components/Dashboard/WeatherCard'
 import { HeadlinesFeed }   from '../components/Dashboard/HeadlinesFeed'
 import { DashboardChat }   from '../components/Dashboard/DashboardChat'
 import { TravelSafetyCard } from '../components/Dashboard/TravelSafetyCard'
+import ContinueResearchDigest from '../components/Dashboard/ContinueResearchDigest'
 import DashboardSkeleton   from '../components/skeletons/DashboardSkeleton'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -271,13 +272,21 @@ export default function AIDashboardPage() {
         <StatCard icon="📰" label="News topics"    value={stats.news}     sub="topics tracked" color="var(--agent-writer)" onClick={() => window.location.href='/news'} />
       </div>
 
+      {/* "Continue your research" — cross-references History against fresh
+          News search, server-side, to surface only topics with genuinely
+          new coverage. See ContinueResearchDigest.jsx + the backend's
+          GET /api/news/continue-research. */}
+      <div className="dash-stagger dash-stagger--4">
+        <ContinueResearchDigest />
+      </div>
+
       {/* Main grid — Weather / Headlines / Travel Safety.
           className was previously missing here entirely, so the matching
           .dash-top-grid breakpoints in index.css (1100px, 700px) never
           applied — this 3-column row stayed fixed-width all the way down
           to phone sizes, squeezing each card to roughly a third of a
           375px screen. */}
-      <div className="dash-top-grid dash-stagger dash-stagger--4" style={{ marginBottom: '1rem' }}>
+      <div className="dash-top-grid dash-stagger dash-stagger--5" style={{ marginBottom: '1rem' }}>
         <WeatherCard
           weather={weather} loading={weatherLoading} error={weatherError}
           cityInput={weatherInput} setCityInput={setWeatherInput} onFetch={fetchWeather}

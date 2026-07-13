@@ -15,6 +15,9 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -31,6 +34,7 @@ from database import (
     track_news_topic_async,
     delete_tracked_topic_async,
     log_activity_async,
+    get_history_async,
 )
 
 # ── Router ────────────────────────────────────────────────────────────────────
@@ -94,6 +98,99 @@ async def news_search(
         "category": cat,
         "days":     days,
     }
+
+
+# ── Helper — best-effort published_date parsing ─────────────────────────────────
+# Tavily's published_date comes through in whatever format the source site
+# used — usually RFC 2822 or ISO 8601, but never guaranteed. Unparseable
+# dates fail open (article is kept) rather than silently disappearing.
+
+def _parse_published(raw: str | None) -> float | None:
+    if not raw:
+        return None
+    try:
+        return datetime.fromisoformat(raw.replace("Z", "+00:00")).timestamp()
+    except (ValueError, TypeError):
+        pass
+    try:
+        dt = parsedate_to_datetime(raw)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.timestamp()
+    except (ValueError, TypeError):
+        return None
+
+
+# ── GET /api/news/continue-research ─────────────────────────────────────────────
+# The cross-reference feature: looks at what the user has researched recently
+# and checks whether genuinely new news coverage exists for those same
+# topics since they last looked. This is the one feature that ties the
+# Research and News modules together instead of leaving them as two
+# disconnected tools that happen to share a nav bar.
+
+@router.get("/api/news/continue-research")
+async def continue_research_digest(
+    limit:        int = Query(default=5, ge=1, le=10),
+    current_user: CurrentUser = None,
+):
+    """
+    For the user's most recent distinct research topics, search news scoped
+    to "since that run happened" and return only topics where new coverage
+    actually exists — an empty-but-checked topic is omitted, not shown with
+    zero results, so this never pads the digest with dead entries.
+    """
+    runs = await get_history_async(limit=25, user_id=current_user["id"])
+
+    # Dedupe by topic (case-insensitive) — keep the most recent run per topic,
+    # since get_history_async already returns newest-first.
+    seen: set[str] = set()
+    distinct_runs: list[dict] = []
+    for run in runs:
+        key = (run.get("topic") or "").strip().lower()
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        distinct_runs.append(run)
+        if len(distinct_runs) >= limit:
+            break
+
+    if not distinct_runs:
+        return {"digest": []}
+
+    now  = time.time()
+    loop = asyncio.get_event_loop()
+
+    async def _check_topic(run: dict) -> dict | None:
+        researched_at = run.get("created_at") or now
+        days_ago = max(1, min(30, int((now - researched_at) / 86400) + 1))
+        try:
+            articles = await loop.run_in_executor(
+                None, lambda: _news_module.search_news(run["topic"], days=days_ago)
+            )
+        except RuntimeError:
+            return None  # news search unavailable — skip this topic, don't fail the whole digest
+
+        fresh = []
+        for a in articles:
+            pub = _parse_published(a.get("published_date"))
+            if pub is None or pub >= researched_at:
+                fresh.append(a)
+        if not fresh:
+            return None
+
+        return {
+            "run_id":            run["id"],
+            "topic":             run["topic"],
+            "researched_at":     researched_at,
+            "days_ago":          days_ago,
+            "new_article_count": len(fresh),
+            "top_articles":      fresh[:3],
+        }
+
+    results = await asyncio.gather(*[_check_topic(r) for r in distinct_runs])
+    digest  = [r for r in results if r is not None]
+
+    return {"digest": digest}
 
 
 # ── GET /api/news/summarize ───────────────────────────────────────────────────

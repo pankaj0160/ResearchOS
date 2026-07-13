@@ -153,6 +153,13 @@ news_limiter = SlidingWindowRateLimiter(
     max_requests=10, window_seconds=60, name="news"
 )
 
+# Follow-up Q&A: 15 per 60 seconds per user
+# Why: single LLM call, no search/scrape — cheaper than a research run, so a
+# more generous limit than research_limiter, but still bounded against abuse.
+followup_limiter = SlidingWindowRateLimiter(
+    max_requests=15, window_seconds=60, name="followup"
+)
+
 # Dashboard chat: 20 per 60 seconds per user
 # Why: lighter than research but still triggers LLM — generous limit
 dashboard_limiter = SlidingWindowRateLimiter(

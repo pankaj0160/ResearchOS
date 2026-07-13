@@ -31,6 +31,8 @@ export function useSSEStream() {
   const [topic,     setTopic]     = useState('')
   const [runId,     setRunId]     = useState(null)
   const [ragSessionId, setRagSessionId] = useState(null)
+  const [sources,   setSources]   = useState([])       // NEW: live source rail data
+  const [readSourceUrl, setReadSourceUrl] = useState(null)  // NEW: which source the Reader Agent opened
 
   const eventSourceRef = useRef(null)
   const timeoutRef     = useRef(null)
@@ -38,6 +40,7 @@ export function useSSEStream() {
   const reportRef      = useRef('')
   const feedbackRef    = useRef('')
   const lastTopicRef   = useRef('')
+  const lastFocusModeRef = useRef('balanced')
   // KEY FIX: track whether we received a clean 'done' event from the server.
   // onerror fires on EVERY close — including clean server-side closes.
   // Without this flag every successful run ends with "Connection lost".
@@ -137,6 +140,20 @@ export function useSSEStream() {
       return
     }
 
+    // ── Sources event — structured search results for the live source rail ───
+    if (agent === 'search' && type === 'sources') {
+      if (Array.isArray(event.sources)) {
+        setSources(event.sources)
+      }
+      return
+    }
+
+    // ── Source-read event — which URL the Reader Agent actually opened ───────
+    if (agent === 'reader' && type === 'source_read') {
+      if (event.url) setReadSourceUrl(event.url)
+      return
+    }
+
     // ── Done event — clean stream end ─────────────────────────────────────────
     // This is sent by main.py as the very last SSE event.
     // Setting streamDoneRef.current = true BEFORE closeStream() ensures that
@@ -230,7 +247,7 @@ export function useSSEStream() {
     }
   }, [closeStream, failRun, milestones.length, patchStep, pushMilestone, pushRawLog])
 
-  const start = useCallback((nextTopic, workspaceId = null) => {
+  const start = useCallback((nextTopic, workspaceId = null, focusMode = 'balanced') => {
     const cleanTopic = nextTopic.trim()
     if (!cleanTopic) return
 
@@ -239,6 +256,7 @@ export function useSSEStream() {
     reportRef.current   = ''
     feedbackRef.current = ''
     lastTopicRef.current = cleanTopic
+    lastFocusModeRef.current = focusMode
     streamDoneRef.current = false  // reset for new run
 
     setTopic(cleanTopic)
@@ -253,10 +271,12 @@ export function useSSEStream() {
     setError(null)
     setRunId(null)
     setRagSessionId(null)   // reset so old button doesn't show on new run
+    setSources([])
+    setReadSourceUrl(null)
     setRunStatus('loading')
 
     const token   = localStorage.getItem('researchos_token')
-    const params  = new URLSearchParams({ topic: cleanTopic })
+    const params  = new URLSearchParams({ topic: cleanTopic, focus_mode: focusMode })
     if (token) params.set('token', token)
     if (workspaceId) params.set('workspace_id', String(workspaceId))  // NEW
 
@@ -310,10 +330,12 @@ export function useSSEStream() {
     setTopic('')
     setRunId(null)
     setRagSessionId(null)
+    setSources([])
+    setReadSourceUrl(null)
   }, [closeStream])
 
   const retry = useCallback(() => {
-    if (lastTopicRef.current) start(lastTopicRef.current)
+    if (lastTopicRef.current) start(lastTopicRef.current, null, lastFocusModeRef.current)
   }, [start])
 
   const visibleMilestones = useMemo(() => milestones.slice(-20), [milestones])
@@ -330,6 +352,8 @@ export function useSSEStream() {
     topic,
     runId,
     ragSessionId,          // NEW: null until research run completes
+    sources,               // NEW: live source rail — [{title, url, snippet}]
+    readSourceUrl,         // NEW: the url the Reader Agent actually opened, once known
     isRunning: runStatus === 'loading' || runStatus === 'running' || runStatus === 'generating_report',
     isDone:    runStatus === 'completed',
     start,

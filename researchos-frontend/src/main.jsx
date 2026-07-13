@@ -89,6 +89,7 @@ const WorkspacePage   = lazy(() => import('./pages/WorkspacePage'))
 const HistoryPage     = lazy(() => import('./pages/HistoryPage'))
 const CalendarPage    = lazy(() => import('./pages/CalendarPage'))
 const ProfilePage     = lazy(() => import('./pages/ProfilePage'))
+const PublicReportPage = lazy(() => import('./pages/PublicReportPage'))
 
 
 // ── Page loader — shown while a lazy chunk is downloading ─────────────────────
@@ -198,6 +199,14 @@ function App() {
 
         <Route path="/forgot-password" element={
           <GuestRoute><ForgotPasswordPage /></GuestRoute>
+        } />
+
+        {/* Public, unauthenticated, read-only shared report view.
+            No GuestRoute wrapper — logged-in users can view shared links too. */}
+        <Route path="/r/:token" element={
+          <ErrorBoundary pageName="Shared Report">
+            <PublicReportPage />
+          </ErrorBoundary>
         } />
 
 
